@@ -19,6 +19,13 @@ if (!connectionString) {
 
 const pool = new Pool({ connectionString });
 
+// Neon can drop idle pooled connections. Without a listener, that surfaces as
+// an unhandled 'error' event on the pg client and crashes the process. Log it
+// instead; the pool transparently opens a fresh connection for the next query.
+pool.on("error", (err) => {
+  console.error("Unexpected database pool error:", err.message);
+});
+
 export const db = drizzle(pool, { schema });
 
 export * from "./schema";

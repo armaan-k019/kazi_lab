@@ -15,6 +15,13 @@
       "when": 1780894960952,
       "tag": "0001_minor_amazoness",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1780896387190,
+      "tag": "0002_exotic_red_hulk",
+      "breakpoints": true
     }
   ]
 }

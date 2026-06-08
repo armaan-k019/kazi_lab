@@ -18,6 +18,10 @@ export async function POST(request: Request) {
     body && typeof body === "object" && "url" in body
       ? (body as { url: unknown }).url
       : undefined;
+  const libraryId =
+    body && typeof body === "object" && "libraryId" in body
+      ? (body as { libraryId?: unknown }).libraryId
+      : undefined;
 
   if (typeof url !== "string" || url.trim().length === 0) {
     return NextResponse.json(
@@ -27,12 +31,23 @@ export async function POST(request: Request) {
   }
 
   try {
-    const result = await ingestPaper(url.trim());
+    const result = await ingestPaper(
+      url.trim(),
+      typeof libraryId === "string" && libraryId.length > 0
+        ? libraryId
+        : undefined,
+    );
     return NextResponse.json(result);
   } catch (error) {
     console.error("POST /api/scribe/ingest failed:", error);
     const message = error instanceof Error ? error.message : String(error);
 
+    if (/library not found/i.test(message)) {
+      return NextResponse.json(
+        { error: "Target library not found." },
+        { status: 404 },
+      );
+    }
     if (/is not a valid url|could not parse an arxiv id/i.test(message)) {
       return NextResponse.json(
         { error: "That doesn't look like a valid URL or arXiv ID." },

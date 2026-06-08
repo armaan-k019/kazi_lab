@@ -4,21 +4,62 @@ import {
   claims,
   db,
   extractions,
+  libraries,
   paperAuthors,
+  paperLibraries,
   papers,
 } from "@kazi-lab/db";
 import { fetchSource } from "./fetch-source";
 import { extractPaperFields } from "./extractor";
 
+export type IngestResult = {
+  paperId: string;
+  claimsInserted: number;
+  alreadyIngested: boolean; // kept for the existing UI; true when we linked an existing paper
+  linkedExisting: boolean;
+  libraryId: string;
+};
+
+// Resolve the target library: the given id (validated), or the default
+// "general" library (created if it somehow doesn't exist yet).
+async function resolveLibraryId(libraryId?: string): Promise<string> {
+  if (libraryId) {
+    const [lib] = await db
+      .select({ id: libraries.id })
+      .from(libraries)
+      .where(eq(libraries.id, libraryId))
+      .limit(1);
+    if (!lib) throw new Error(`Library not found: ${libraryId}`);
+    return lib.id;
+  }
+  const [general] = await db
+    .select({ id: libraries.id })
+    .from(libraries)
+    .where(eq(libraries.name, "general"))
+    .limit(1);
+  if (general) return general.id;
+  const [created] = await db
+    .insert(libraries)
+    .values({ name: "general", description: "Default library." })
+    .returning({ id: libraries.id });
+  return created.id;
+}
+
 export async function ingestPaper(
   url: string,
-): Promise<{ paperId: string; claimsInserted: number; alreadyIngested: boolean }> {
+  libraryId?: string,
+): Promise<IngestResult> {
   console.log(`Fetching source: ${url}`);
   const paper = await fetchSource(url);
-  console.log(`Fetched ${paper.sourceType} source: "${paper.title || "(untitled)"}"`);
+  console.log(
+    `Fetched ${paper.sourceType} source: "${paper.title || "(untitled)"}"`,
+  );
+
+  const targetLibraryId = await resolveLibraryId(libraryId);
 
   // Dedupe before the (costly) extraction call. arXiv keys on arxiv_id; other
-  // sources key on the canonical URL.
+  // sources key on the canonical URL. A known paper is linked to the target
+  // library rather than re-extracted.
   const existing = paper.arxivId
     ? await db
         .select({ id: papers.id })
@@ -31,16 +72,25 @@ export async function ingestPaper(
         .where(eq(papers.url, paper.url))
         .limit(1);
   if (existing.length > 0) {
-    console.log(`Already ingested: ${existing[0].id}. Skipping.`);
-    return { paperId: existing[0].id, claimsInserted: 0, alreadyIngested: true };
+    const paperId = existing[0].id;
+    await db
+      .insert(paperLibraries)
+      .values({ paperId, libraryId: targetLibraryId })
+      .onConflictDoNothing();
+    console.log(`Already ingested: ${paperId}. Linked to library.`);
+    return {
+      paperId,
+      claimsInserted: 0,
+      alreadyIngested: true,
+      linkedExisting: true,
+      libraryId: targetLibraryId,
+    };
   }
 
   console.log("Extracting with Claude...");
   const extraction = await extractPaperFields(paper);
   console.log(`Extracted ${extraction.claims.length} claims.`);
 
-  // For inferred sources, prefer Claude's inferred metadata over the fetch-time
-  // hints. For arXiv, the API metadata on `paper` is authoritative.
   const meta = extraction.inferredMetadata;
   const finalTitle = (meta?.title || paper.title || "(untitled)").trim();
   const finalAuthors = meta ? meta.authors : paper.authors;
@@ -112,7 +162,11 @@ export async function ingestPaper(
       claimsInserted = extraction.claims.length;
     }
 
-    // Citations remain deferred (would require parsing references).
+    // Link the new paper to the target library.
+    await tx
+      .insert(paperLibraries)
+      .values({ paperId, libraryId: targetLibraryId })
+      .onConflictDoNothing();
 
     await tx
       .update(papers)
@@ -123,5 +177,10 @@ export async function ingestPaper(
   });
 
   console.log(`Done: ${result.paperId}`);
-  return { ...result, alreadyIngested: false };
+  return {
+    ...result,
+    alreadyIngested: false,
+    linkedExisting: false,
+    libraryId: targetLibraryId,
+  };
 }

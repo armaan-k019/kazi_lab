@@ -86,3 +86,28 @@ export async function GET(
     );
   }
 }
+
+// Delete a paper entirely. FK cascades remove its extractions, claims,
+// paper_authors, paper_libraries, and finding/relation links.
+export async function DELETE(
+  _request: Request,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  const { id } = await params;
+  try {
+    const deleted = await db
+      .delete(papers)
+      .where(eq(papers.id, id))
+      .returning({ id: papers.id });
+    if (deleted.length === 0) {
+      return NextResponse.json({ error: "Paper not found." }, { status: 404 });
+    }
+    return NextResponse.json({ ok: true, deletedId: id });
+  } catch (error) {
+    console.error(`DELETE /api/scribe/papers/${id} failed:`, error);
+    return NextResponse.json(
+      { error: "Failed to delete the paper." },
+      { status: 500 },
+    );
+  }
+}

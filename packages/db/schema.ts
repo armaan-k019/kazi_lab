@@ -103,12 +103,42 @@ export const annotations = pgTable("annotations", {
 });
 
 // ---------------------------------------------------------------------------
+// Libraries: named collections of papers. A paper can belong to many libraries
+// (ingest once, link to many). "general" is the default, undeletable library.
+// ---------------------------------------------------------------------------
+
+export const libraries = pgTable("libraries", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  name: text("name").notNull(),
+  description: text("description"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const paperLibraries = pgTable(
+  "paper_libraries",
+  {
+    paperId: uuid("paper_id")
+      .notNull()
+      .references(() => papers.id, { onDelete: "cascade" }),
+    libraryId: uuid("library_id")
+      .notNull()
+      .references(() => libraries.id, { onDelete: "cascade" }),
+    addedAt: timestamp("added_at").notNull().defaultNow(),
+  },
+  (table) => [primaryKey({ columns: [table.paperId, table.libraryId] })],
+);
+
+// ---------------------------------------------------------------------------
 // Synthesis layer: cross-paper themes, findings, and typed relations between
 // claims, each tied to the synthesis run that produced it (for versioning).
 // ---------------------------------------------------------------------------
 
 export const synthesisRuns = pgTable("synthesis_runs", {
   id: uuid("id").primaryKey().defaultRandom(),
+  // The library this run synthesized over (null = legacy/whole-corpus runs).
+  libraryId: uuid("library_id").references(() => libraries.id, {
+    onDelete: "cascade",
+  }),
   startedAt: timestamp("started_at").notNull().defaultNow(),
   completedAt: timestamp("completed_at"),
   status: text("status").notNull().default("running"), // running | completed | failed
@@ -204,6 +234,12 @@ export type NewCitation = typeof citations.$inferInsert;
 
 export type Annotation = typeof annotations.$inferSelect;
 export type NewAnnotation = typeof annotations.$inferInsert;
+
+export type Library = typeof libraries.$inferSelect;
+export type NewLibrary = typeof libraries.$inferInsert;
+
+export type PaperLibrary = typeof paperLibraries.$inferSelect;
+export type NewPaperLibrary = typeof paperLibraries.$inferInsert;
 
 export type SynthesisRun = typeof synthesisRuns.$inferSelect;
 export type NewSynthesisRun = typeof synthesisRuns.$inferInsert;
