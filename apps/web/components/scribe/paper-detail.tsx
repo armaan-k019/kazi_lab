@@ -2,15 +2,30 @@
 
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
-import type { Claim, PaperDetail as PaperDetailData } from "@/lib/types";
+import type {
+  Claim,
+  DiscoveryCandidate,
+  ExternalAuthor,
+  PaperContext,
+  PaperDetail as PaperDetailData,
+} from "@/lib/types";
 import { formatPublished, formatTimestamp } from "@/lib/format";
 
 type Props = {
   id: string;
   onBack: () => void;
+  libraryId: string | null;
+  libraryName: string;
+  onIngested: () => void;
 };
 
-export function PaperDetail({ id, onBack }: Props) {
+export function PaperDetail({
+  id,
+  onBack,
+  libraryId,
+  libraryName,
+  onIngested,
+}: Props) {
   const [data, setData] = useState<PaperDetailData | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -161,6 +176,15 @@ export function PaperDetail({ id, onBack }: Props) {
               </div>
             </section>
           )}
+
+          {libraryId && (
+            <ExploreSection
+              paperId={id}
+              libraryId={libraryId}
+              libraryName={libraryName}
+              onIngested={onIngested}
+            />
+          )}
         </article>
       )}
     </motion.div>
@@ -208,5 +232,330 @@ function ClaimCard({ claim }: { claim: Claim }) {
         </span>
       )}
     </div>
+  );
+}
+
+// Lazily-loaded discovery area: authors, references, and citing works from
+// OpenAlex. Nothing is fetched until the user expands it.
+function ExploreSection({
+  paperId,
+  libraryId,
+  libraryName,
+  onIngested,
+}: {
+  paperId: string;
+  libraryId: string;
+  libraryName: string;
+  onIngested: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [ctx, setCtx] = useState<PaperContext | null>(null);
+  const [author, setAuthor] = useState<ExternalAuthor | null>(null);
+
+  const expand = () => {
+    setOpen((v) => !v);
+    if (ctx || loading) return;
+    setLoading(true);
+    fetch(
+      `/api/external/paper-context?paperId=${paperId}&libraryId=${libraryId}`,
+    )
+      .then(async (res) => {
+        const body = await res.json();
+        if (!res.ok) throw new Error(body.error ?? "Could not load context.");
+        return body as PaperContext;
+      })
+      .then(setCtx)
+      .catch((e: Error) => setError(e.message))
+      .finally(() => setLoading(false));
+  };
+
+  return (
+    <section className="mt-12 border-t border-border pt-8">
+      <button
+        type="button"
+        onClick={expand}
+        className="text-[13px] font-medium text-accent transition-opacity hover:opacity-80"
+      >
+        {open ? "Explore ▾" : "Explore references, citations, and author works ▸"}
+      </button>
+
+      {open && (
+        <div className="mt-5">
+          {loading && (
+            <p className="flex items-center gap-2 text-[13px] text-text-secondary">
+              <Spinner /> loading from OpenAlex…
+            </p>
+          )}
+          {error && <p className="text-[13px] text-[#b4493b]">{error}</p>}
+          {ctx && !ctx.available && (
+            <p className="text-[13px] text-text-muted">
+              External context not available (paper not found in OpenAlex).
+            </p>
+          )}
+          {ctx && ctx.available && (
+            <div className="space-y-8">
+              <div>
+                <SectionLabel>Authors</SectionLabel>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {ctx.authors.length === 0 && (
+                    <span className="text-[13px] text-text-muted">
+                      No author records.
+                    </span>
+                  )}
+                  {ctx.authors.map((a) => (
+                    <button
+                      key={a.id}
+                      type="button"
+                      onClick={() =>
+                        setAuthor(author?.id === a.id ? null : a)
+                      }
+                      className={`rounded-full px-2.5 py-1 text-[12px] transition-opacity hover:opacity-80 ${
+                        author?.id === a.id
+                          ? "bg-accent text-white"
+                          : "bg-accent-dim text-accent"
+                      }`}
+                    >
+                      {a.name}
+                    </button>
+                  ))}
+                </div>
+                {author && (
+                  <AuthorWorksPanel
+                    author={author}
+                    libraryId={libraryId}
+                    libraryName={libraryName}
+                    onIngested={onIngested}
+                  />
+                )}
+              </div>
+
+              <CandidateList
+                label="Builds on (top references)"
+                candidates={ctx.buildsOn}
+                libraryId={libraryId}
+                libraryName={libraryName}
+                onIngested={onIngested}
+              />
+              <CandidateList
+                label="Cited by (most influential)"
+                candidates={ctx.citedBy}
+                libraryId={libraryId}
+                libraryName={libraryName}
+                onIngested={onIngested}
+              />
+            </div>
+          )}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function AuthorWorksPanel({
+  author,
+  libraryId,
+  libraryName,
+  onIngested,
+}: {
+  author: ExternalAuthor;
+  libraryId: string;
+  libraryName: string;
+  onIngested: () => void;
+}) {
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [works, setWorks] = useState<DiscoveryCandidate[] | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    setWorks(null);
+    fetch(
+      `/api/external/author-works?authorId=${author.id}&libraryId=${libraryId}`,
+    )
+      .then(async (res) => {
+        const body = await res.json();
+        if (!res.ok) throw new Error(body.error ?? "Could not load works.");
+        return body.works as DiscoveryCandidate[];
+      })
+      .then((w) => {
+        if (!cancelled) setWorks(w);
+      })
+      .catch((e: Error) => {
+        if (!cancelled) setError(e.message);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [author.id, libraryId]);
+
+  return (
+    <div className="mt-4 rounded-xl border border-border bg-surface p-4">
+      <p className="text-[13px] text-text-secondary">
+        Top works by {author.name}
+      </p>
+      {loading && (
+        <p className="mt-2 flex items-center gap-2 text-[13px] text-text-muted">
+          <Spinner /> loading…
+        </p>
+      )}
+      {error && <p className="mt-2 text-[13px] text-[#b4493b]">{error}</p>}
+      {works && (
+        <div className="mt-3 space-y-2">
+          {works.map((c) => (
+            <CandidateRow
+              key={c.openalexId}
+              candidate={c}
+              libraryId={libraryId}
+              libraryName={libraryName}
+              onIngested={onIngested}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CandidateList({
+  label,
+  candidates,
+  libraryId,
+  libraryName,
+  onIngested,
+}: {
+  label: string;
+  candidates: DiscoveryCandidate[];
+  libraryId: string;
+  libraryName: string;
+  onIngested: () => void;
+}) {
+  return (
+    <div>
+      <SectionLabel>{label}</SectionLabel>
+      {candidates.length === 0 ? (
+        <p className="mt-2 text-[13px] text-text-muted">None found.</p>
+      ) : (
+        <div className="mt-3 space-y-2">
+          {candidates.map((c) => (
+            <CandidateRow
+              key={c.openalexId}
+              candidate={c}
+              libraryId={libraryId}
+              libraryName={libraryName}
+              onIngested={onIngested}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CandidateRow({
+  candidate,
+  libraryId,
+  libraryName,
+  onIngested,
+}: {
+  candidate: DiscoveryCandidate;
+  libraryId: string;
+  libraryName: string;
+  onIngested: () => void;
+}) {
+  const [state, setState] = useState<"idle" | "working" | "done" | "error">(
+    "idle",
+  );
+  const [note, setNote] = useState<string | null>(null);
+
+  const run = async () => {
+    if (!candidate.ingestableUrl) return;
+    setState("working");
+    setNote(null);
+    try {
+      const res = await fetch("/api/scribe/ingest", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: candidate.ingestableUrl, libraryId }),
+      });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error ?? "Ingest failed.");
+      setState("done");
+      setNote(
+        body.linkedExisting
+          ? "added (already in corpus)"
+          : `ingested · ${body.claimsInserted ?? 0} claims`,
+      );
+      onIngested();
+    } catch (e) {
+      setState("error");
+      setNote((e as Error).message);
+    }
+  };
+
+  return (
+    <div className="flex items-start justify-between gap-3 rounded-lg border border-border bg-surface px-3 py-2">
+      <div className="min-w-0">
+        <p className="truncate text-[14px] text-text-primary">
+          {candidate.title || "untitled"}
+        </p>
+        <p className="mt-0.5 text-[12px] text-text-muted">
+          {candidate.year ?? "year unknown"}
+          {candidate.citedByCount != null &&
+            ` · cited ${candidate.citedByCount.toLocaleString()}`}
+        </p>
+      </div>
+
+      <div className="shrink-0 text-right text-[12px]">
+        {state === "done" ? (
+          <span className="text-accent">{note}</span>
+        ) : state === "working" ? (
+          <span className="flex items-center gap-1.5 text-text-secondary">
+            <Spinner /> working…
+          </span>
+        ) : candidate.inThisLibrary ? (
+          <span className="text-text-muted">in this library</span>
+        ) : candidate.ingestableUrl ? (
+          <button
+            type="button"
+            onClick={run}
+            className="font-medium text-accent transition-opacity hover:opacity-80"
+          >
+            {candidate.inCorpus
+              ? `add to ${libraryName}`
+              : `ingest into ${libraryName}`}
+          </button>
+        ) : candidate.doi ? (
+          <a
+            href={`https://doi.org/${candidate.doi}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-text-muted transition-colors hover:text-accent"
+          >
+            view ↗
+          </a>
+        ) : (
+          <span className="text-text-muted">no source</span>
+        )}
+        {state === "error" && note && (
+          <p className="mt-1 max-w-[180px] text-[#b4493b]">{note}</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function Spinner() {
+  return (
+    <span
+      className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-border border-t-accent"
+      aria-hidden="true"
+    />
   );
 }

@@ -311,7 +311,17 @@ export function ScribeView() {
     : null;
 
   if (selectedId) {
-    return <PaperDetail id={selectedId} onBack={() => setSelectedId(null)} />;
+    return (
+      <PaperDetail
+        id={selectedId}
+        onBack={() => setSelectedId(null)}
+        libraryId={activeLibraryId}
+        libraryName={activeName}
+        onIngested={() => {
+          if (activeLibraryId) void refresh(activeLibraryId);
+        }}
+      />
+    );
   }
 
   return (

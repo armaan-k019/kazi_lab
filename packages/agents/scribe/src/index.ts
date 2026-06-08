@@ -23,8 +23,17 @@ export {
   searchWorkByTitle,
   getWorkByDoi,
   getWorkByArxivId,
+  getWork,
+  getWorksByIds,
+  getCitingWorks,
+  getAuthorWorks,
   type OpenAlexCandidate,
+  type OpenAlexWork,
 } from "./openalex";
+export {
+  shapeCandidates,
+  type DiscoveryCandidate,
+} from "./external-candidates";
 export {
   resolvePaperExternal,
   type ExternalResolution,

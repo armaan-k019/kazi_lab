@@ -101,6 +101,26 @@ export type ChatResponse = {
   refused: boolean;
 };
 
+export type DiscoveryCandidate = {
+  openalexId: string;
+  title: string;
+  year: number | null;
+  citedByCount: number | null;
+  doi: string | null;
+  ingestableUrl: string | null;
+  inThisLibrary: boolean;
+  inCorpus: boolean;
+};
+export type ExternalAuthor = { id: string; name: string };
+export type PaperContext =
+  | { available: false }
+  | {
+      available: true;
+      authors: ExternalAuthor[];
+      buildsOn: DiscoveryCandidate[];
+      citedBy: DiscoveryCandidate[];
+    };
+
 export type RelationType = "supports" | "contradicts" | "extends";
 
 export type SynthesisPaper = {

@@ -116,3 +116,122 @@ export async function searchWorkByTitle(
   const json = (await getJson(url)) as { results?: RawWork[] } | null;
   return (json?.results ?? []).map(toCandidate);
 }
+
+// ---------------------------------------------------------------------------
+// Discovery: richer work records for the citation-context and author-works
+// features. These carry the fields needed to shape ingestable candidates
+// (references, citing works, best fetchable URL).
+// ---------------------------------------------------------------------------
+
+export type OpenAlexWork = {
+  openalexId: string; // "W..."
+  title: string;
+  year: number | null;
+  citedByCount: number | null;
+  doi: string | null; // "10...."
+  arxivAbsUrl: string | null; // https://arxiv.org/abs/{id} if this is an arXiv work
+  oaUrl: string | null; // open access full-text URL
+  pdfUrl: string | null; // primary location pdf
+  landingUrl: string | null; // primary location landing page
+  referencedWorkIds: string[]; // "W..." ids this work cites
+  authors: { id: string; name: string }[]; // only authors with an OpenAlex id
+};
+
+type RawWorkFull = RawWork & {
+  open_access?: { oa_url?: string | null } | null;
+  primary_location?: {
+    source?: { display_name?: string | null } | null;
+    pdf_url?: string | null;
+    landing_page_url?: string | null;
+  } | null;
+  locations?: { landing_page_url?: string | null }[] | null;
+  referenced_works?: string[] | null;
+};
+
+function arxivAbsFrom(w: RawWorkFull): string | null {
+  const doi = (w.doi ?? "").toLowerCase();
+  const m = doi.match(/10\.48550\/arxiv\.([^/\s]+)/);
+  if (m) return `https://arxiv.org/abs/${m[1]}`;
+  for (const loc of w.locations ?? []) {
+    const lp = loc.landing_page_url ?? "";
+    const lm = lp.match(/arxiv\.org\/abs\/([^?#\s]+)/i);
+    if (lm) return `https://arxiv.org/abs/${lm[1]}`;
+  }
+  return null;
+}
+
+function mapWork(w: RawWorkFull): OpenAlexWork {
+  return {
+    openalexId: stripPrefix(w.id, "https://openalex.org/") ?? "",
+    title: (w.title ?? w.display_name ?? "").trim(),
+    year: w.publication_year ?? null,
+    citedByCount: w.cited_by_count ?? null,
+    doi: stripPrefix(w.doi ?? null, "https://doi.org/"),
+    arxivAbsUrl: arxivAbsFrom(w),
+    oaUrl: w.open_access?.oa_url ?? null,
+    pdfUrl: w.primary_location?.pdf_url ?? null,
+    landingUrl: w.primary_location?.landing_page_url ?? null,
+    referencedWorkIds: (w.referenced_works ?? []).map(
+      (u) => stripPrefix(u, "https://openalex.org/") ?? "",
+    ),
+    authors: (w.authorships ?? [])
+      .map((a) => ({
+        id: stripPrefix(a.author?.id ?? null, "https://openalex.org/") ?? "",
+        name: (a.author?.display_name ?? "").trim(),
+      }))
+      .filter((a) => a.id.length > 0 && a.name.length > 0),
+  };
+}
+
+// Full work record by OpenAlex id (includes referenced_works, authorships).
+export async function getWork(openalexId: string): Promise<OpenAlexWork | null> {
+  const id = stripPrefix(openalexId, "https://openalex.org/") ?? openalexId;
+  const url = `${BASE}/works/${encodeURIComponent(id)}?mailto=${encodeURIComponent(mailto())}`;
+  const json = (await getJson(url)) as RawWorkFull | null;
+  if (!json || !json.id) return null;
+  return mapWork(json);
+}
+
+// Batch-fetch metadata for many works. OpenAlex allows up to 50 ids per OR
+// filter, so we chunk. Order is not guaranteed; callers sort as needed.
+export async function getWorksByIds(ids: string[]): Promise<OpenAlexWork[]> {
+  const bare = ids
+    .map((i) => stripPrefix(i, "https://openalex.org/") ?? i)
+    .filter((i) => i.length > 0);
+  const out: OpenAlexWork[] = [];
+  for (let i = 0; i < bare.length; i += 50) {
+    const chunk = bare.slice(i, i + 50);
+    const url =
+      `${BASE}/works?filter=openalex_id:${chunk.join("|")}` +
+      `&per-page=${chunk.length}&mailto=${encodeURIComponent(mailto())}`;
+    const json = (await getJson(url)) as { results?: RawWorkFull[] } | null;
+    for (const w of json?.results ?? []) out.push(mapWork(w));
+  }
+  return out;
+}
+
+// Works that cite the given work, most influential first.
+export async function getCitingWorks(
+  openalexId: string,
+  limit = 12,
+): Promise<OpenAlexWork[]> {
+  const id = stripPrefix(openalexId, "https://openalex.org/") ?? openalexId;
+  const url =
+    `${BASE}/works?filter=cites:${id}&sort=cited_by_count:desc` +
+    `&per-page=${limit}&mailto=${encodeURIComponent(mailto())}`;
+  const json = (await getJson(url)) as { results?: RawWorkFull[] } | null;
+  return (json?.results ?? []).map(mapWork);
+}
+
+// An author's works, most cited first.
+export async function getAuthorWorks(
+  authorId: string,
+  limit = 15,
+): Promise<OpenAlexWork[]> {
+  const id = stripPrefix(authorId, "https://openalex.org/") ?? authorId;
+  const url =
+    `${BASE}/works?filter=author.id:${id}&sort=cited_by_count:desc` +
+    `&per-page=${limit}&mailto=${encodeURIComponent(mailto())}`;
+  const json = (await getJson(url)) as { results?: RawWorkFull[] } | null;
+  return (json?.results ?? []).map(mapWork);
+}
