@@ -50,4 +50,14 @@ export type IngestResult = {
   paperId: string;
   claimsInserted: number;
   alreadyIngested: boolean;
+  linkedExisting?: boolean;
+  libraryId?: string;
+};
+
+export type Library = {
+  id: string;
+  name: string;
+  description: string | null;
+  createdAt: string;
+  paperCount: number;
 };
