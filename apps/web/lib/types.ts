@@ -90,6 +90,7 @@ export type SynthesisPaper = {
   publishedAt: string | null;
   claimCount: number;
   claims: { id: string; text: string }[];
+  narration: string | null;
 };
 
 export type SynthesisTheme = {

@@ -10,6 +10,7 @@ import {
   libraries,
   openQuestions,
   paperLibraries,
+  paperNarrations,
   papers,
   paperThemes,
   synthesisRuns,
@@ -20,6 +21,87 @@ import {
 // uses Sonnet). claude-opus-4-6 is a current, valid Opus model.
 const MODEL = "claude-opus-4-6";
 const MAX_TOKENS = 16000;
+
+// Narration is descriptive writing grounded in the already-computed relations,
+// not the hard cross-paper judgment Opus already did, so Sonnet is enough and
+// cheaper.
+const NARRATION_MODEL = "claude-sonnet-4-6";
+const NARRATION_MAX_TOKENS = 4000;
+
+const NARRATION_PROMPT = `You are writing short positioning notes for papers in a research library. For each paper, write 2-4 sentences describing its place in THIS library's web of relationships: what it builds on or extends, what it is supported by or contradicts or is contradicted by, and its distinct contribution relative to the OTHER papers in this library. Ground every statement in the provided relations and corpus. Do not restate the paper's abstract in isolation; position it relative to its neighbors. Be specific and concise. If a paper has few or no relations, say briefly that it stands relatively independent in this library and note its core contribution. Return ONLY JSON: { "narrations": [ { "paper_id": "...", "narration": "..." } ] }, one entry per paper id provided. Never invent relations not present in the data.`;
+
+type RelEntry = {
+  fromPaperId: string;
+  toPaperId: string;
+  relationType: string;
+  rationale: string | null;
+};
+
+// One Sonnet call producing a positioning paragraph per paper, grounded in the
+// finalized relations. Returns [] on any failure (caller treats it as
+// supplementary and never fails the run over it).
+async function generateNarrations(
+  libraryName: string,
+  papersInfo: {
+    id: string;
+    title: string;
+    problem: string | null;
+    method: string | null;
+  }[],
+  relations: RelEntry[],
+  validPaperIds: Set<string>,
+): Promise<{ paperId: string; narration: string }[]> {
+  const titleOf = new Map(papersInfo.map((p) => [p.id, p.title]));
+  const doc = papersInfo
+    .map((p) => {
+      const rels = relations
+        .filter((r) => r.fromPaperId === p.id || r.toPaperId === p.id)
+        .map((r) => {
+          const outgoing = r.fromPaperId === p.id;
+          const other = titleOf.get(outgoing ? r.toPaperId : r.fromPaperId);
+          const dir = outgoing
+            ? `this paper ${r.relationType} "${other}"`
+            : `"${other}" ${r.relationType} this paper`;
+          return `  - ${dir}${r.rationale ? ` — ${r.rationale}` : ""}`;
+        });
+      return [
+        `PAPER ${p.id}`,
+        `Title: ${p.title}`,
+        p.problem ? `Problem: ${p.problem}` : "",
+        p.method ? `Method: ${p.method}` : "",
+        "Relations:",
+        rels.length ? rels.join("\n") : "  - no cross-paper relations in this library",
+      ]
+        .filter(Boolean)
+        .join("\n");
+    })
+    .join("\n\n");
+
+  const client = new Anthropic();
+  const response = await client.messages.create({
+    model: NARRATION_MODEL,
+    max_tokens: NARRATION_MAX_TOKENS,
+    system: NARRATION_PROMPT,
+    messages: [
+      { role: "user", content: `Library: ${libraryName}\n\n${doc}` },
+    ],
+  });
+  const block = response.content.find((b) => b.type === "text");
+  const raw = block && block.type === "text" ? block.text : "";
+  const fenced = raw.trim().match(/^```(?:json)?\s*([\s\S]*?)\s*```$/);
+  const parsed = JSON.parse(fenced ? fenced[1].trim() : raw.trim()) as {
+    narrations?: { paper_id?: string; narration?: string }[];
+  };
+  return (parsed.narrations ?? [])
+    .filter(
+      (n): n is { paper_id: string; narration: string } =>
+        typeof n?.paper_id === "string" &&
+        typeof n?.narration === "string" &&
+        n.narration.trim().length > 0 &&
+        validPaperIds.has(n.paper_id),
+    )
+    .map((n) => ({ paperId: n.paper_id, narration: n.narration.trim() }));
+}
 
 export type SynthesisCounts = {
   runId: string;
@@ -227,6 +309,9 @@ export async function runSynthesis(runId: string): Promise<SynthesisCounts> {
 
     let relationCount = 0;
     let skippedRelations = 0;
+    // Captured during the tx so the narration step can reuse the finalized,
+    // validated relations without re-deriving them.
+    const validRelations: RelEntry[] = [];
     const counts = await db.transaction(async (tx) => {
       const themeRows = parsed.themes ?? [];
       for (const t of themeRows) {
@@ -301,6 +386,12 @@ export async function runSynthesis(runId: string): Promise<SynthesisCounts> {
           relationType: r.relation_type,
           rationale: r.rationale ?? null,
         });
+        validRelations.push({
+          fromPaperId: claimPaper.get(from)!,
+          toPaperId: claimPaper.get(to)!,
+          relationType: r.relation_type,
+          rationale: r.rationale ?? null,
+        });
         relationCount++;
       }
 
@@ -335,6 +426,41 @@ export async function runSynthesis(runId: string): Promise<SynthesisCounts> {
           : null,
       })
       .where(eq(synthesisRuns.id, runId));
+
+    // Narration is supplementary: generate and store per-paper positioning
+    // paragraphs, but never fail the (already completed) run if it errors.
+    try {
+      const narrations = await generateNarrations(
+        library.name,
+        libPapers.map((p) => ({
+          id: p.id,
+          title: p.title,
+          problem: extByPaper.get(p.id)?.problem ?? null,
+          method: extByPaper.get(p.id)?.method ?? null,
+        })),
+        validRelations,
+        validPaperIds,
+      );
+      if (narrations.length) {
+        await db.insert(paperNarrations).values(
+          narrations.map((n) => ({
+            synthesisRunId: runId,
+            paperId: n.paperId,
+            narration: n.narration,
+          })),
+        );
+      }
+      console.log(`Wrote ${narrations.length} paper narrations.`);
+    } catch (narrErr) {
+      const msg = narrErr instanceof Error ? narrErr.message : String(narrErr);
+      console.error("Narration step failed (run still completed):", msg);
+      await db
+        .update(synthesisRuns)
+        .set({
+          notes: `${skippedRelations ? `Skipped ${skippedRelations} relation(s). ` : ""}Narration failed: ${msg.slice(0, 200)}`,
+        })
+        .where(eq(synthesisRuns.id, runId));
+    }
 
     return { runId, relationCount, ...counts };
   } catch (error) {

@@ -233,6 +233,21 @@ export const openQuestions = pgTable("open_questions", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
+// A short, precomputed positioning paragraph per (paper, synthesis run): where
+// the paper sits in this library's web (what it extends, what contradicts it,
+// its distinct contribution). Supplementary — a run is usable without it.
+export const paperNarrations = pgTable("paper_narrations", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  synthesisRunId: uuid("synthesis_run_id")
+    .notNull()
+    .references(() => synthesisRuns.id, { onDelete: "cascade" }),
+  paperId: uuid("paper_id")
+    .notNull()
+    .references(() => papers.id, { onDelete: "cascade" }),
+  narration: text("narration").notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
 export type Paper = typeof papers.$inferSelect;
 export type NewPaper = typeof papers.$inferInsert;
 
@@ -280,3 +295,6 @@ export type NewClaimRelation = typeof claimRelations.$inferInsert;
 
 export type OpenQuestion = typeof openQuestions.$inferSelect;
 export type NewOpenQuestion = typeof openQuestions.$inferInsert;
+
+export type PaperNarration = typeof paperNarrations.$inferSelect;
+export type NewPaperNarration = typeof paperNarrations.$inferInsert;

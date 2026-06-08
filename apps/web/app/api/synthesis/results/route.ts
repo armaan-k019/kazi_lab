@@ -8,6 +8,7 @@ import {
   findingPapers,
   openQuestions,
   paperLibraries,
+  paperNarrations,
   papers,
   paperThemes,
   synthesisRuns,
@@ -80,9 +81,22 @@ export async function GET(request: Request) {
       arr.push({ id: c.id, text: c.text });
       claimsByPaper.set(c.paperId, arr);
     }
+    // Per-paper narration for this run (supplementary; may be absent).
+    const narrationRows = await db
+      .select({
+        paperId: paperNarrations.paperId,
+        narration: paperNarrations.narration,
+      })
+      .from(paperNarrations)
+      .where(eq(paperNarrations.synthesisRunId, run.id));
+    const narrationByPaper = new Map(
+      narrationRows.map((n) => [n.paperId, n.narration]),
+    );
+
     const paperRows = paperBase.map((p) => ({
       ...p,
       claims: claimsByPaper.get(p.id) ?? [],
+      narration: narrationByPaper.get(p.id) ?? null,
     }));
 
     // Themes + their papers.

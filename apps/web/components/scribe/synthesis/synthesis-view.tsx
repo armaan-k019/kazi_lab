@@ -71,6 +71,12 @@ export function SynthesisView({
       for (const c of p.claims) m.set(c.id, { text: c.text, paperId: p.id });
     return m;
   }, [data]);
+  const narrationByPaper = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const p of data?.papers ?? [])
+      if (p.narration) m.set(p.id, p.narration);
+    return m;
+  }, [data]);
 
   const back = (
     <button
@@ -207,19 +213,33 @@ export function SynthesisView({
 
           {selected.kind === "paper" &&
             (() => {
+              const narration = narrationByPaper.get(selected.id);
               const rels = relations.filter(
                 (r) =>
                   r.fromPaperId === selected.id || r.toPaperId === selected.id,
               );
-              if (rels.length === 0)
-                return (
-                  <p className="mt-2 text-[13px] text-text-muted">
-                    This paper has no cross-paper claim relations in this run.
-                  </p>
-                );
               return (
-                <ul className="mt-3 space-y-3">
-                  {rels.map((r) => {
+                <>
+                  {narration && (
+                    <p className="mt-2 text-[15px] leading-[1.65] text-text-primary">
+                      {narration}
+                    </p>
+                  )}
+                  {rels.length === 0 ? (
+                    <p className="mt-3 text-[13px] text-text-muted">
+                      {narration
+                        ? "No cross-paper claim relations in this run."
+                        : "This paper has no cross-paper claim relations in this run."}
+                    </p>
+                  ) : (
+                    <>
+                      {narration && (
+                        <p className="mt-4 text-[12px] font-medium text-text-muted">
+                          Relations
+                        </p>
+                      )}
+                      <ul className="mt-2 space-y-3">
+                        {rels.map((r) => {
                     const outgoing = r.fromPaperId === selected.id;
                     const otherId = outgoing ? r.toPaperId : r.fromPaperId;
                     return (
@@ -233,8 +253,11 @@ export function SynthesisView({
                         rationale={r.rationale}
                       />
                     );
-                  })}
-                </ul>
+                        })}
+                      </ul>
+                    </>
+                  )}
+                </>
               );
             })()}
 
