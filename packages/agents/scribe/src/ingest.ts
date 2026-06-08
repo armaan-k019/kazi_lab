@@ -11,6 +11,7 @@ import {
 } from "@kazi-lab/db";
 import { fetchSource } from "./fetch-source";
 import { extractPaperFields } from "./extractor";
+import { buildPaperSummary, embedAndStorePaper } from "./embed-store";
 
 export type IngestResult = {
   paperId: string;
@@ -175,6 +176,34 @@ export async function ingestPaper(
 
     return { paperId, claimsInserted };
   });
+
+  // Embeddings are supplementary: embed the new paper's claims + summary, but
+  // never fail ingestion if embedding errors (it can be backfilled later).
+  try {
+    const claimRows = await db
+      .select({ id: claims.id, text: claims.text })
+      .from(claims)
+      .where(eq(claims.paperId, result.paperId));
+    const summary = buildPaperSummary({
+      problem: extraction.problem,
+      method: extraction.method,
+      results: extraction.results,
+      limitations: extraction.limitations,
+    });
+    const r = await embedAndStorePaper({
+      paperId: result.paperId,
+      claims: claimRows,
+      summary,
+    });
+    console.log(
+      `Embedded ${r.claimCount} claims${r.paperSummary ? " + paper summary" : ""}.`,
+    );
+  } catch (embErr) {
+    console.error(
+      "Embedding step failed (paper still ingested):",
+      (embErr as Error).message,
+    );
+  }
 
   console.log(`Done: ${result.paperId}`);
   return {

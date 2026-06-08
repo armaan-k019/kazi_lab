@@ -36,6 +36,13 @@
       "when": 1780927913437,
       "tag": "0004_salty_annihilus",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1780928954426,
+      "tag": "0005_redundant_namora",
+      "breakpoints": true
     }
   ]
 }

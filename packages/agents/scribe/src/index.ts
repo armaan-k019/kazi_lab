@@ -16,3 +16,6 @@ export {
   type InferredMetadata,
 } from "./extractor";
 export type { SourcePaperData, SourceType } from "./types";
+export { embedTexts, embedQuery, EMBEDDING_MODEL } from "./embeddings";
+export { embedAndStorePaper, buildPaperSummary } from "./embed-store";
+export { retrieveRelevant, type RetrievedChunk } from "./retrieve";

@@ -1,12 +1,20 @@
 import { sql } from "drizzle-orm";
 import {
+  index,
   integer,
   pgTable,
   primaryKey,
   text,
   timestamp,
+  uniqueIndex,
   uuid,
+  vector,
 } from "drizzle-orm/pg-core";
+
+// voyage-3.5-lite outputs 1024-dimensional embeddings by default (verified
+// against Voyage docs: supported dims 256, 512, 1024 default, 2048). The
+// pgvector column dimension must match this exactly.
+export const EMBEDDING_DIM = 1024;
 
 export const papers = pgTable("papers", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -248,6 +256,34 @@ export const paperNarrations = pgTable("paper_narrations", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
+// Vector embeddings of claims and paper-level summaries (pgvector). entity_id
+// is the claim or paper id; paper_id is always the owning paper so retrieval
+// can scope by library via paper_libraries. content is the exact embedded text.
+export const embeddings = pgTable(
+  "embeddings",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    entityType: text("entity_type").notNull(), // claim | paper
+    entityId: uuid("entity_id").notNull(),
+    paperId: uuid("paper_id")
+      .notNull()
+      .references(() => papers.id, { onDelete: "cascade" }),
+    embedding: vector("embedding", { dimensions: EMBEDDING_DIM }).notNull(),
+    model: text("model").notNull(),
+    content: text("content").notNull(),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (table) => [
+    // One embedding per (entity_type, entity_id); re-embedding replaces it.
+    uniqueIndex("embeddings_entity_uq").on(table.entityType, table.entityId),
+    // Approximate-nearest-neighbor search via HNSW with cosine distance.
+    index("embeddings_hnsw_cos_idx").using(
+      "hnsw",
+      table.embedding.op("vector_cosine_ops"),
+    ),
+  ],
+);
+
 export type Paper = typeof papers.$inferSelect;
 export type NewPaper = typeof papers.$inferInsert;
 
@@ -298,3 +334,6 @@ export type NewOpenQuestion = typeof openQuestions.$inferInsert;
 
 export type PaperNarration = typeof paperNarrations.$inferSelect;
 export type NewPaperNarration = typeof paperNarrations.$inferInsert;
+
+export type Embedding = typeof embeddings.$inferSelect;
+export type NewEmbedding = typeof embeddings.$inferInsert;
