@@ -18,10 +18,12 @@ export function SynthesisControl({
   libraryId,
   libraryName,
   paperCount,
+  onViewSynthesis,
 }: {
   libraryId: string;
   libraryName: string;
   paperCount: number;
+  onViewSynthesis: () => void;
 }) {
   const [phase, setPhase] = useState<Phase>("idle");
   const [runId, setRunId] = useState<string | null>(null);
@@ -169,7 +171,21 @@ export function SynthesisControl({
         )}
       </div>
 
-      <p className="mt-1.5 text-[12px] text-text-muted">{latestText}</p>
+      <p className="mt-1.5 text-[12px] text-text-muted">
+        {latestText}
+        {latest && (
+          <>
+            {" · "}
+            <button
+              type="button"
+              onClick={onViewSynthesis}
+              className="text-accent transition-opacity hover:opacity-80"
+            >
+              view synthesis
+            </button>
+          </>
+        )}
+      </p>
     </div>
   );
 }

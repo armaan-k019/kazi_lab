@@ -81,3 +81,63 @@ export type SynthesisStatus = {
 export type SynthesisLatest =
   | ({ runId: string; completedAt: string | null } & SynthesisCountSet)
   | null;
+
+export type RelationType = "supports" | "contradicts" | "extends";
+
+export type SynthesisPaper = { id: string; title: string; claimCount: number };
+
+export type SynthesisTheme = {
+  id: string;
+  name: string;
+  description: string | null;
+  paperIds: string[];
+};
+
+export type SynthesisSupport = {
+  paperId: string;
+  claimId: string | null;
+  claimText: string | null;
+};
+
+export type SynthesisFinding = {
+  id: string;
+  statement: string;
+  detail: string | null;
+  consensus: string | null;
+  supports: SynthesisSupport[];
+};
+
+export type SynthesisRelation = {
+  id: string;
+  relationType: string;
+  rationale: string | null;
+  fromClaimId: string;
+  toClaimId: string;
+  fromClaimText: string;
+  toClaimText: string;
+  fromPaperId: string;
+  toPaperId: string;
+};
+
+export type SynthesisOpenQuestion = {
+  id: string;
+  question: string;
+  rationale: string | null;
+  relatedPaperIds: string[];
+};
+
+export type SynthesisResults = {
+  run:
+    | {
+        id: string;
+        completedAt: string | null;
+        paperCount: number | null;
+        counts: SynthesisCountSet;
+      }
+    | null;
+  papers: SynthesisPaper[];
+  themes: SynthesisTheme[];
+  findings: SynthesisFinding[];
+  relations: SynthesisRelation[];
+  openQuestions: SynthesisOpenQuestion[];
+};

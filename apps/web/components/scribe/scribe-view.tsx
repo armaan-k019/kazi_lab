@@ -7,6 +7,7 @@ import { formatAuthors, formatPublished, formatTimestamp } from "@/lib/format";
 import { PaperDetail } from "./paper-detail";
 import { LibrarySwitcher } from "./library-switcher";
 import { SynthesisControl } from "./synthesis-control";
+import { SynthesisView } from "./synthesis/synthesis-view";
 
 type IngestStage = "fetching" | "extracting" | "writing";
 const STAGES: IngestStage[] = ["fetching", "extracting", "writing"];
@@ -17,6 +18,8 @@ export function ScribeView() {
   const [papers, setPapers] = useState<PaperSummary[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  const [viewingSynthesis, setViewingSynthesis] = useState(false);
 
   const [url, setUrl] = useState("");
   const [working, setWorking] = useState(false);
@@ -213,19 +216,30 @@ export function ScribeView() {
         </div>
       )}
 
-      {/* Synthesis control, scoped to the active library. Keyed by library id so
-          switching libraries remounts it (resets state, cancels stale polls). */}
-      {activeLibraryId && (
-        <SynthesisControl
+      {viewingSynthesis && activeLibraryId ? (
+        // Synthesis view, keyed by library so switching libraries reloads it.
+        <SynthesisView
           key={activeLibraryId}
           libraryId={activeLibraryId}
           libraryName={activeName}
-          paperCount={activeLibrary?.paperCount ?? papers?.length ?? 0}
+          onBack={() => setViewingSynthesis(false)}
         />
-      )}
+      ) : (
+        <>
+          {/* Synthesis control, scoped to the active library. Keyed by library
+              id so switching libraries remounts it (resets state, stops polls). */}
+          {activeLibraryId && (
+            <SynthesisControl
+              key={activeLibraryId}
+              libraryId={activeLibraryId}
+              libraryName={activeName}
+              paperCount={activeLibrary?.paperCount ?? papers?.length ?? 0}
+              onViewSynthesis={() => setViewingSynthesis(true)}
+            />
+          )}
 
-      {/* Ingestion bar */}
-      <form onSubmit={handleIngest} className="flex flex-col gap-2.5">
+          {/* Ingestion bar */}
+          <form onSubmit={handleIngest} className="flex flex-col gap-2.5">
         <div className="flex gap-2.5">
           <input
             type="text"
@@ -314,7 +328,9 @@ export function ScribeView() {
             </AnimatePresence>
           </ul>
         )}
-      </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }
