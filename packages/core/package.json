@@ -1,0 +1,12 @@
+{
+  "name": "@kazi-lab/core",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./types/index.ts",
+    "./claude": "./claude/client.ts",
+    "./types": "./types/index.ts",
+    "./utils": "./utils/index.ts"
+  }
+}

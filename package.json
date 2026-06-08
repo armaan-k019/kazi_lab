@@ -1,0 +1,25 @@
+{
+  "name": "kazi-lab",
+  "version": "1.0.0",
+  "description": "Research lab for applied CS to spatial reasoning and related domains.",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*",
+    "packages/agents/*"
+  ],
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "Armaan Kazi",
+  "license": "ISC",
+  "devEngines": {
+    "packageManager": {
+      "name": "pnpm",
+      "version": "11.5.2",
+      "onFail": "download"
+    }
+  }
+}

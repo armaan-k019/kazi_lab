@@ -1,0 +1,12 @@
+packages:
+  - "apps/*"
+  - "packages/*"
+  - "packages/agents/*"
+
+# pnpm 11 requires an explicit decision on dependency build scripts.
+# These three ship native binaries (Next.js bundler resolver, image
+# processing, drizzle-kit bundler), so their install scripts are allowed.
+allowBuilds:
+  esbuild: true
+  sharp: true
+  unrs-resolver: true
