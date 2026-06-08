@@ -121,6 +121,11 @@ export function SynthesisView({
     contested: findings.filter((f) => f.consensus === "contested").length,
     single: findings.filter((f) => f.consensus === "single-source").length,
   };
+  // Distinct from "contested" findings: claim relations of type "contradicts"
+  // (the red edges in the graph). Counted from the same client-side data.
+  const contradictionCount = relations.filter(
+    (r) => r.relationType === "contradicts",
+  ).length;
 
   return (
     <motion.div
@@ -150,6 +155,11 @@ export function SynthesisView({
         {" · "}
         <span className="text-text-muted">
           {consensusCounts.single} single-source
+        </span>
+        {" · "}
+        <span className="text-[#b4493b]">
+          {contradictionCount}{" "}
+          {contradictionCount === 1 ? "contradiction" : "contradictions"}
         </span>
       </p>
 
