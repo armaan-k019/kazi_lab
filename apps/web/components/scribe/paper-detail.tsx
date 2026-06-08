@@ -86,6 +86,28 @@ export function PaperDetail({ id, onBack }: Props) {
             </a>
           </div>
 
+          {/* External identity (OpenAlex), only when confidently matched. */}
+          {data.external &&
+            (data.external.citedByCount != null || data.external.doi) && (
+              <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[13px] text-text-muted">
+                {data.external.citedByCount != null && (
+                  <span>
+                    Cited {data.external.citedByCount.toLocaleString()} times
+                  </span>
+                )}
+                {data.external.doi && (
+                  <a
+                    href={`https://doi.org/${data.external.doi}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-accent transition-opacity hover:opacity-80"
+                  >
+                    DOI ↗
+                  </a>
+                )}
+              </div>
+            )}
+
           {!data.extraction && (
             <p className="mt-10 text-sm text-text-muted">
               No extraction recorded for this paper.

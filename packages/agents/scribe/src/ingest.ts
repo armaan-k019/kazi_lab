@@ -12,6 +12,7 @@ import {
 import { fetchSource } from "./fetch-source";
 import { extractPaperFields } from "./extractor";
 import { buildPaperSummary, embedAndStorePaper } from "./embed-store";
+import { enrichPaperExternal } from "./enrich-store";
 
 export type IngestResult = {
   paperId: string;
@@ -202,6 +203,28 @@ export async function ingestPaper(
     console.error(
       "Embedding step failed (paper still ingested):",
       (embErr as Error).message,
+    );
+  }
+
+  // External enrichment is supplementary: resolve against OpenAlex and attach
+  // identity, but never fail ingestion if it errors (it can be backfilled).
+  try {
+    const r = await enrichPaperExternal({
+      paperId: result.paperId,
+      paper: {
+        title: finalTitle,
+        authors: finalAuthors,
+        publishedAt: finalPublishedAt,
+        arxivId: paper.arxivId,
+      },
+    });
+    console.log(
+      `OpenAlex: ${r.matchStatus}${r.improvedMetadata ? " (metadata improved)" : ""}.`,
+    );
+  } catch (enrErr) {
+    console.error(
+      "Enrichment step failed (paper still ingested):",
+      (enrErr as Error).message,
     );
   }
 

@@ -1,11 +1,12 @@
 import { NextResponse } from "next/server";
-import { asc, eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import {
   authors,
   claims,
   db,
   extractions,
   paperAuthors,
+  paperExternal,
   papers,
 } from "@kazi-lab/db";
 
@@ -72,11 +73,29 @@ export async function GET(
       .where(eq(paperAuthors.paperId, id))
       .orderBy(asc(paperAuthors.position));
 
+    // External identity (OpenAlex), only when confidently matched.
+    const [ext] = await db
+      .select({
+        citedByCount: paperExternal.citedByCount,
+        doi: paperExternal.doi,
+        venue: paperExternal.venue,
+      })
+      .from(paperExternal)
+      .where(
+        and(
+          eq(paperExternal.paperId, id),
+          eq(paperExternal.source, "openalex"),
+          eq(paperExternal.matchStatus, "matched"),
+        ),
+      )
+      .limit(1);
+
     return NextResponse.json({
       paper,
       extraction: extraction ?? null,
       claims: claimRows,
       authors: authorRows,
+      external: ext ?? null,
     });
   } catch (error) {
     console.error(`GET /api/scribe/papers/${id} failed:`, error);

@@ -44,6 +44,11 @@ export type PaperDetail = {
   extraction: Extraction | null;
   claims: Claim[];
   authors: { name: string; position: number }[];
+  external: {
+    citedByCount: number | null;
+    doi: string | null;
+    venue: string | null;
+  } | null;
 };
 
 export type IngestResult = {

@@ -9,7 +9,8 @@
   "scripts": {
     "ingest": "tsx src/cli.ts",
     "synthesize": "tsx src/synthesize-cli.ts",
-    "embed-backfill": "tsx src/embed-backfill-cli.ts"
+    "embed-backfill": "tsx src/embed-backfill-cli.ts",
+    "enrich-backfill": "tsx src/enrich-backfill-cli.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.102.0",

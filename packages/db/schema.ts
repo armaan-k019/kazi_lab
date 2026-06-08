@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 import {
   index,
   integer,
+  numeric,
   pgTable,
   primaryKey,
   text,
@@ -337,3 +338,38 @@ export type NewPaperNarration = typeof paperNarrations.$inferInsert;
 
 export type Embedding = typeof embeddings.$inferSelect;
 export type NewEmbedding = typeof embeddings.$inferInsert;
+
+// External identity + enrichment for a paper (discovery layer, not first-class
+// corpus data). One row per paper per source; v1 source is "openalex".
+export const paperExternal = pgTable(
+  "paper_external",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    paperId: uuid("paper_id")
+      .notNull()
+      .references(() => papers.id, { onDelete: "cascade" }),
+    source: text("source").notNull(), // openalex
+    openalexId: text("openalex_id"),
+    doi: text("doi"),
+    citedByCount: integer("cited_by_count"),
+    venue: text("venue"),
+    authoritativeTitle: text("authoritative_title"),
+    authoritativeYear: integer("authoritative_year"),
+    matchStatus: text("match_status").notNull(), // matched | unmatched | ambiguous
+    matchScore: numeric("match_score"),
+    authorOpenalexIds: text("author_openalex_ids")
+      .array()
+      .default(sql`'{}'::text[]`),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("paper_external_paper_source_uq").on(
+      table.paperId,
+      table.source,
+    ),
+  ],
+);
+
+export type PaperExternal = typeof paperExternal.$inferSelect;
+export type NewPaperExternal = typeof paperExternal.$inferInsert;

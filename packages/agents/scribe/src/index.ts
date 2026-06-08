@@ -19,3 +19,15 @@ export type { SourcePaperData, SourceType } from "./types";
 export { embedTexts, embedQuery, EMBEDDING_MODEL } from "./embeddings";
 export { embedAndStorePaper, buildPaperSummary } from "./embed-store";
 export { retrieveRelevant, type RetrievedChunk } from "./retrieve";
+export {
+  searchWorkByTitle,
+  getWorkByDoi,
+  getWorkByArxivId,
+  type OpenAlexCandidate,
+} from "./openalex";
+export {
+  resolvePaperExternal,
+  type ExternalResolution,
+  type ResolvablePaper,
+} from "./resolve-external";
+export { enrichPaperExternal } from "./enrich-store";
