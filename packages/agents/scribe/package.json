@@ -4,6 +4,19 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./index.ts"
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "ingest": "tsx src/cli.ts"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.102.0",
+    "@kazi-lab/db": "workspace:*",
+    "dotenv": "^17.4.2",
+    "drizzle-orm": "^0.45.2",
+    "fast-xml-parser": "^5.8.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.22.4"
   }
 }

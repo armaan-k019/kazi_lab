@@ -1,0 +1,113 @@
+import { eq } from "drizzle-orm";
+import {
+  authors,
+  claims,
+  db,
+  extractions,
+  paperAuthors,
+  papers,
+} from "@kazi-lab/db";
+import { fetchArxivPaper } from "./arxiv-fetcher";
+import { extractPaperFields } from "./extractor";
+
+export async function ingestPaper(
+  arxivUrl: string,
+): Promise<{ paperId: string; claimsInserted: number; alreadyIngested: boolean }> {
+  console.log(`Fetching arXiv: ${arxivUrl}`);
+  const paper = await fetchArxivPaper(arxivUrl);
+  console.log(`Fetched "${paper.title}" (${paper.arxivId})`);
+
+  // Skip papers already in the corpus, keyed by arxiv_id.
+  const existing = await db
+    .select({ id: papers.id })
+    .from(papers)
+    .where(eq(papers.arxivId, paper.arxivId))
+    .limit(1);
+  if (existing.length > 0) {
+    console.log(`Already ingested: ${existing[0].id}. Skipping.`);
+    return { paperId: existing[0].id, claimsInserted: 0, alreadyIngested: true };
+  }
+
+  console.log("Extracting with Claude...");
+  const extraction = await extractPaperFields(paper);
+  console.log(`Extracted ${extraction.claims.length} claims.`);
+
+  console.log("Writing to database...");
+  const result = await db.transaction(async (tx) => {
+    const [insertedPaper] = await tx
+      .insert(papers)
+      .values({
+        arxivId: paper.arxivId,
+        title: paper.title,
+        authors: paper.authors,
+        abstract: paper.abstract,
+        publishedAt: paper.publishedAt,
+        url: paper.url,
+        pdfUrl: paper.pdfUrl,
+        rawText: paper.rawText,
+      })
+      .returning({ id: papers.id });
+    const paperId = insertedPaper.id;
+
+    await tx.insert(extractions).values({
+      paperId,
+      extractionVersion: extraction.extractionVersion,
+      problem: extraction.problem,
+      priorWork: extraction.priorWork,
+      method: extraction.method,
+      results: extraction.results,
+      limitations: extraction.limitations,
+      keyTerms: extraction.keyTerms,
+      datasetsUsed: extraction.datasetsUsed,
+    });
+
+    // Upsert each author by name (name is not unique in the schema, so dedupe
+    // by lookup), then link via paper_authors with a zero-indexed position.
+    for (let position = 0; position < paper.authors.length; position++) {
+      const name = paper.authors[position];
+      const found = await tx
+        .select({ id: authors.id })
+        .from(authors)
+        .where(eq(authors.name, name))
+        .limit(1);
+
+      let authorId: string;
+      if (found.length > 0) {
+        authorId = found[0].id;
+      } else {
+        const [insertedAuthor] = await tx
+          .insert(authors)
+          .values({ name })
+          .returning({ id: authors.id });
+        authorId = insertedAuthor.id;
+      }
+
+      await tx.insert(paperAuthors).values({ paperId, authorId, position });
+    }
+
+    let claimsInserted = 0;
+    if (extraction.claims.length > 0) {
+      await tx.insert(claims).values(
+        extraction.claims.map((claim) => ({
+          paperId,
+          text: claim.text,
+          sourcePassage: claim.sourcePassage,
+          confidence: claim.confidence,
+        })),
+      );
+      claimsInserted = extraction.claims.length;
+    }
+
+    // Citations are deferred for v1 (requires parsing references from the PDF).
+
+    await tx
+      .update(papers)
+      .set({ lastProcessedAt: new Date() })
+      .where(eq(papers.id, paperId));
+
+    return { paperId, claimsInserted };
+  });
+
+  console.log(`Done: ${result.paperId}`);
+  return { ...result, alreadyIngested: false };
+}
