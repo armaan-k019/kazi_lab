@@ -162,6 +162,8 @@ export const findings = pgTable("findings", {
   id: uuid("id").primaryKey().defaultRandom(),
   statement: text("statement").notNull(),
   detail: text("detail"),
+  // consensus | contested | single-source: how well-supported across the library.
+  consensus: text("consensus"),
   synthesisRunId: uuid("synthesis_run_id")
     .notNull()
     .references(() => synthesisRuns.id, { onDelete: "cascade" }),
@@ -214,6 +216,23 @@ export const claimRelations = pgTable("claim_relations", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
+// Gaps the corpus raises but does not answer.
+export const openQuestions = pgTable("open_questions", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  synthesisRunId: uuid("synthesis_run_id")
+    .notNull()
+    .references(() => synthesisRuns.id, { onDelete: "cascade" }),
+  libraryId: uuid("library_id")
+    .notNull()
+    .references(() => libraries.id, { onDelete: "cascade" }),
+  question: text("question").notNull(),
+  rationale: text("rationale"),
+  relatedPaperIds: uuid("related_paper_ids")
+    .array()
+    .default(sql`'{}'::uuid[]`),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
 export type Paper = typeof papers.$inferSelect;
 export type NewPaper = typeof papers.$inferInsert;
 
@@ -258,3 +277,6 @@ export type NewFindingPaper = typeof findingPapers.$inferInsert;
 
 export type ClaimRelation = typeof claimRelations.$inferSelect;
 export type NewClaimRelation = typeof claimRelations.$inferInsert;
+
+export type OpenQuestion = typeof openQuestions.$inferSelect;
+export type NewOpenQuestion = typeof openQuestions.$inferInsert;

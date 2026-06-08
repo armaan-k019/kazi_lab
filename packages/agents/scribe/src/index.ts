@@ -1,4 +1,5 @@
 export { ingestPaper } from "./ingest";
+export { synthesizeLibrary, type SynthesisCounts } from "./synthesize";
 export { fetchSource } from "./fetch-source";
 export { fetchArxivPaper, isArxivInput } from "./arxiv-fetcher";
 export { fetchPdfPaper } from "./pdf-fetcher";

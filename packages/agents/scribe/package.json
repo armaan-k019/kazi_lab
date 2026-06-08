@@ -7,7 +7,8 @@
     ".": "./src/index.ts"
   },
   "scripts": {
-    "ingest": "tsx src/cli.ts"
+    "ingest": "tsx src/cli.ts",
+    "synthesize": "tsx src/synthesize-cli.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.102.0",
