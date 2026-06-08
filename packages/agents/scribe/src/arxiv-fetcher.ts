@@ -1,15 +1,5 @@
 import { XMLParser } from "fast-xml-parser";
-
-export type ArxivPaperData = {
-  arxivId: string;
-  title: string;
-  authors: string[];
-  abstract: string;
-  publishedAt: Date | null;
-  url: string; // canonical abs URL
-  pdfUrl: string;
-  rawText: string;
-};
+import type { SourcePaperData } from "./types";
 
 const ARXIV_API = "http://export.arxiv.org/api/query";
 const USER_AGENT = "kazi-lab/0.1 (research)";
@@ -18,6 +8,15 @@ const USER_AGENT = "kazi-lab/0.1 (research)";
 // into single spaces.
 function normalizeWhitespace(value: string): string {
   return value.replace(/\s+/g, " ").trim();
+}
+
+// True when the input is an arXiv reference: an arxiv.org URL, or a bare arXiv
+// id like "2401.12345" / "2401.12345v2" (a token, not an arbitrary URL that
+// merely contains such digits).
+export function isArxivInput(input: string): boolean {
+  const trimmed = input.trim();
+  if (/arxiv\.org/i.test(trimmed)) return true;
+  return /^\d{4}\.\d{4,5}(v\d+)?$/.test(trimmed);
 }
 
 // Accepts any of: full abs/pdf URLs (with or without protocol or version
@@ -76,7 +75,7 @@ async function fetchArxivXml(arxivId: string): Promise<string> {
 
 export async function fetchArxivPaper(
   arxivUrl: string,
-): Promise<ArxivPaperData> {
+): Promise<SourcePaperData> {
   const arxivId = extractArxivId(arxivUrl);
 
   const xml = await fetchArxivXml(arxivId);
@@ -122,10 +121,11 @@ export async function fetchArxivPaper(
 
   const url = `https://arxiv.org/abs/${arxivId}`;
 
-  // v1: raw_text is title + abstract. Full PDF text extraction is a v2 item.
+  // arXiv raw_text is title + abstract (the arXiv path is unchanged).
   const rawText = `${title}\n\n${abstract}`;
 
   return {
+    sourceType: "arxiv",
     arxivId,
     title,
     authors,
@@ -134,5 +134,6 @@ export async function fetchArxivPaper(
     url,
     pdfUrl,
     rawText,
+    metadataConfidence: "high",
   };
 }

@@ -8,6 +8,13 @@
       "when": 1780884038234,
       "tag": "0000_futuristic_morlocks",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1780894960952,
+      "tag": "0001_minor_amazoness",
+      "breakpoints": true
     }
   ]
 }

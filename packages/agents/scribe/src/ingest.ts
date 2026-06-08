@@ -7,22 +7,29 @@ import {
   paperAuthors,
   papers,
 } from "@kazi-lab/db";
-import { fetchArxivPaper } from "./arxiv-fetcher";
+import { fetchSource } from "./fetch-source";
 import { extractPaperFields } from "./extractor";
 
 export async function ingestPaper(
-  arxivUrl: string,
+  url: string,
 ): Promise<{ paperId: string; claimsInserted: number; alreadyIngested: boolean }> {
-  console.log(`Fetching arXiv: ${arxivUrl}`);
-  const paper = await fetchArxivPaper(arxivUrl);
-  console.log(`Fetched "${paper.title}" (${paper.arxivId})`);
+  console.log(`Fetching source: ${url}`);
+  const paper = await fetchSource(url);
+  console.log(`Fetched ${paper.sourceType} source: "${paper.title || "(untitled)"}"`);
 
-  // Skip papers already in the corpus, keyed by arxiv_id.
-  const existing = await db
-    .select({ id: papers.id })
-    .from(papers)
-    .where(eq(papers.arxivId, paper.arxivId))
-    .limit(1);
+  // Dedupe before the (costly) extraction call. arXiv keys on arxiv_id; other
+  // sources key on the canonical URL.
+  const existing = paper.arxivId
+    ? await db
+        .select({ id: papers.id })
+        .from(papers)
+        .where(eq(papers.arxivId, paper.arxivId))
+        .limit(1)
+    : await db
+        .select({ id: papers.id })
+        .from(papers)
+        .where(eq(papers.url, paper.url))
+        .limit(1);
   if (existing.length > 0) {
     console.log(`Already ingested: ${existing[0].id}. Skipping.`);
     return { paperId: existing[0].id, claimsInserted: 0, alreadyIngested: true };
@@ -32,16 +39,23 @@ export async function ingestPaper(
   const extraction = await extractPaperFields(paper);
   console.log(`Extracted ${extraction.claims.length} claims.`);
 
+  // For inferred sources, prefer Claude's inferred metadata over the fetch-time
+  // hints. For arXiv, the API metadata on `paper` is authoritative.
+  const meta = extraction.inferredMetadata;
+  const finalTitle = (meta?.title || paper.title || "(untitled)").trim();
+  const finalAuthors = meta ? meta.authors : paper.authors;
+  const finalPublishedAt = meta ? meta.publishedAt : paper.publishedAt;
+
   console.log("Writing to database...");
   const result = await db.transaction(async (tx) => {
     const [insertedPaper] = await tx
       .insert(papers)
       .values({
         arxivId: paper.arxivId,
-        title: paper.title,
-        authors: paper.authors,
+        title: finalTitle,
+        authors: finalAuthors,
         abstract: paper.abstract,
-        publishedAt: paper.publishedAt,
+        publishedAt: finalPublishedAt,
         url: paper.url,
         pdfUrl: paper.pdfUrl,
         rawText: paper.rawText,
@@ -63,8 +77,8 @@ export async function ingestPaper(
 
     // Upsert each author by name (name is not unique in the schema, so dedupe
     // by lookup), then link via paper_authors with a zero-indexed position.
-    for (let position = 0; position < paper.authors.length; position++) {
-      const name = paper.authors[position];
+    for (let position = 0; position < finalAuthors.length; position++) {
+      const name = finalAuthors[position];
       const found = await tx
         .select({ id: authors.id })
         .from(authors)
@@ -98,7 +112,7 @@ export async function ingestPaper(
       claimsInserted = extraction.claims.length;
     }
 
-    // Citations are deferred for v1 (requires parsing references from the PDF).
+    // Citations remain deferred (would require parsing references).
 
     await tx
       .update(papers)

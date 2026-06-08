@@ -8,10 +8,11 @@ const here = dirname(fileURLToPath(import.meta.url));
 config({ path: resolve(here, "../../../../.env.local") });
 
 async function main(): Promise<void> {
-  const arxivUrl = process.argv[2];
-  if (!arxivUrl) {
+  const sourceUrl = process.argv[2];
+  if (!sourceUrl) {
     console.error(
-      "Usage: pnpm --filter @kazi-lab/scribe ingest <arxiv-url>\n" +
+      "Usage: pnpm --filter @kazi-lab/scribe ingest <url>\n" +
+        "Accepts an arXiv URL/ID, a PDF link, or an HTML article.\n" +
         "Example: pnpm --filter @kazi-lab/scribe ingest https://arxiv.org/abs/2312.00738",
     );
     process.exit(1);
@@ -19,7 +20,7 @@ async function main(): Promise<void> {
 
   // Import after env is loaded so the db client and Anthropic client see it.
   const { ingestPaper } = await import("./ingest");
-  const result = await ingestPaper(arxivUrl);
+  const result = await ingestPaper(sourceUrl);
 
   console.log("");
   console.log(`paperId:        ${result.paperId}`);

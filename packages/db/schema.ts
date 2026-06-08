@@ -102,6 +102,88 @@ export const annotations = pgTable("annotations", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
+// ---------------------------------------------------------------------------
+// Synthesis layer: cross-paper themes, findings, and typed relations between
+// claims, each tied to the synthesis run that produced it (for versioning).
+// ---------------------------------------------------------------------------
+
+export const synthesisRuns = pgTable("synthesis_runs", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  startedAt: timestamp("started_at").notNull().defaultNow(),
+  completedAt: timestamp("completed_at"),
+  status: text("status").notNull().default("running"), // running | completed | failed
+  paperCount: integer("paper_count"),
+  model: text("model"),
+  error: text("error"),
+  notes: text("notes"),
+});
+
+export const themes = pgTable("themes", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  name: text("name").notNull(),
+  description: text("description"),
+  synthesisRunId: uuid("synthesis_run_id")
+    .notNull()
+    .references(() => synthesisRuns.id, { onDelete: "cascade" }),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const findings = pgTable("findings", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  statement: text("statement").notNull(),
+  detail: text("detail"),
+  synthesisRunId: uuid("synthesis_run_id")
+    .notNull()
+    .references(() => synthesisRuns.id, { onDelete: "cascade" }),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const paperThemes = pgTable(
+  "paper_themes",
+  {
+    paperId: uuid("paper_id")
+      .notNull()
+      .references(() => papers.id, { onDelete: "cascade" }),
+    themeId: uuid("theme_id")
+      .notNull()
+      .references(() => themes.id, { onDelete: "cascade" }),
+    relevance: text("relevance"),
+  },
+  (table) => [primaryKey({ columns: [table.paperId, table.themeId] })],
+);
+
+export const findingPapers = pgTable(
+  "finding_papers",
+  {
+    findingId: uuid("finding_id")
+      .notNull()
+      .references(() => findings.id, { onDelete: "cascade" }),
+    paperId: uuid("paper_id")
+      .notNull()
+      .references(() => papers.id, { onDelete: "cascade" }),
+    supportingClaimId: uuid("supporting_claim_id").references(() => claims.id, {
+      onDelete: "set null",
+    }),
+  },
+  (table) => [primaryKey({ columns: [table.findingId, table.paperId] })],
+);
+
+export const claimRelations = pgTable("claim_relations", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  fromClaimId: uuid("from_claim_id")
+    .notNull()
+    .references(() => claims.id, { onDelete: "cascade" }),
+  toClaimId: uuid("to_claim_id")
+    .notNull()
+    .references(() => claims.id, { onDelete: "cascade" }),
+  relationType: text("relation_type").notNull(), // supports | contradicts | extends
+  rationale: text("rationale"),
+  synthesisRunId: uuid("synthesis_run_id")
+    .notNull()
+    .references(() => synthesisRuns.id, { onDelete: "cascade" }),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
 export type Paper = typeof papers.$inferSelect;
 export type NewPaper = typeof papers.$inferInsert;
 
@@ -122,3 +204,21 @@ export type NewCitation = typeof citations.$inferInsert;
 
 export type Annotation = typeof annotations.$inferSelect;
 export type NewAnnotation = typeof annotations.$inferInsert;
+
+export type SynthesisRun = typeof synthesisRuns.$inferSelect;
+export type NewSynthesisRun = typeof synthesisRuns.$inferInsert;
+
+export type Theme = typeof themes.$inferSelect;
+export type NewTheme = typeof themes.$inferInsert;
+
+export type Finding = typeof findings.$inferSelect;
+export type NewFinding = typeof findings.$inferInsert;
+
+export type PaperTheme = typeof paperThemes.$inferSelect;
+export type NewPaperTheme = typeof paperThemes.$inferInsert;
+
+export type FindingPaper = typeof findingPapers.$inferSelect;
+export type NewFindingPaper = typeof findingPapers.$inferInsert;
+
+export type ClaimRelation = typeof claimRelations.$inferSelect;
+export type NewClaimRelation = typeof claimRelations.$inferInsert;
