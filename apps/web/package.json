@@ -12,6 +12,8 @@
     "@kazi-lab/db": "workspace:*",
     "@kazi-lab/scribe": "workspace:*",
     "d3-force": "^3.0.0",
+    "d3-selection": "^3.0.0",
+    "d3-zoom": "^3.0.0",
     "drizzle-orm": "^0.45.2",
     "framer-motion": "^12.40.0",
     "geist": "^1.7.2",
@@ -22,6 +24,8 @@
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
     "@types/d3-force": "^3.0.10",
+    "@types/d3-selection": "^3.0.11",
+    "@types/d3-zoom": "^3.0.8",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",

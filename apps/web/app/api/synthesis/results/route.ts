@@ -46,10 +46,11 @@ export async function GET(request: Request) {
     if (!run) return NextResponse.json({ run: null });
 
     // Papers currently in the library = the graph's nodes, with claim counts.
-    const paperRows = await db
+    const paperBase = await db
       .select({
         id: papers.id,
         title: papers.title,
+        publishedAt: papers.publishedAt,
         claimCount: sql<number>`count(${claims.id})::int`,
       })
       .from(papers)
@@ -58,9 +59,10 @@ export async function GET(request: Request) {
       .where(eq(paperLibraries.libraryId, libraryId))
       .groupBy(papers.id);
 
-    const paperIds = paperRows.map((p) => p.id);
+    const paperIds = paperBase.map((p) => p.id);
 
-    // Claim lookup (id -> text, paperId) for resolving relations and supports.
+    // Claim lookup (id -> text, paperId) for resolving relations/supports, and
+    // grouped per paper so the graph can render claim sub-nodes.
     const claimRows = paperIds.length
       ? await db
           .select({
@@ -72,6 +74,16 @@ export async function GET(request: Request) {
           .where(inArray(claims.paperId, paperIds))
       : [];
     const claimMap = new Map(claimRows.map((c) => [c.id, c]));
+    const claimsByPaper = new Map<string, { id: string; text: string }[]>();
+    for (const c of claimRows) {
+      const arr = claimsByPaper.get(c.paperId) ?? [];
+      arr.push({ id: c.id, text: c.text });
+      claimsByPaper.set(c.paperId, arr);
+    }
+    const paperRows = paperBase.map((p) => ({
+      ...p,
+      claims: claimsByPaper.get(p.id) ?? [],
+    }));
 
     // Themes + their papers.
     const themeRows = await db

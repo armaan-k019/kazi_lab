@@ -84,7 +84,13 @@ export type SynthesisLatest =
 
 export type RelationType = "supports" | "contradicts" | "extends";
 
-export type SynthesisPaper = { id: string; title: string; claimCount: number };
+export type SynthesisPaper = {
+  id: string;
+  title: string;
+  publishedAt: string | null;
+  claimCount: number;
+  claims: { id: string; text: string }[];
+};
 
 export type SynthesisTheme = {
   id: string;

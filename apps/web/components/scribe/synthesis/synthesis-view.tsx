@@ -11,10 +11,12 @@ import type {
 import { formatRelativeTime } from "@/lib/format";
 import {
   aggregateEdges,
+  relationColor,
   RELATION_COLOR,
+  type GraphSelection,
   type PaperEdge,
 } from "@/lib/synthesis-graph";
-import { RelationGraph } from "./relation-graph";
+import { TimelineGraph } from "./timeline-graph";
 
 export function SynthesisView({
   libraryId,
@@ -27,13 +29,14 @@ export function SynthesisView({
 }) {
   const [data, setData] = useState<SynthesisResults | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [selectedPaperId, setSelectedPaperId] = useState<string | null>(null);
+  const [selected, setSelected] = useState<GraphSelection | null>(null);
+  const selectPaper = (id: string) => setSelected({ kind: "paper", id });
 
   useEffect(() => {
     let cancelled = false;
     setData(null);
     setError(null);
-    setSelectedPaperId(null);
+    setSelected(null);
     fetch(`/api/synthesis/results?libraryId=${libraryId}`)
       .then(async (res) => {
         if (!res.ok) {
@@ -60,6 +63,12 @@ export function SynthesisView({
   const paperTitle = useMemo(() => {
     const m = new Map<string, string>();
     for (const p of data?.papers ?? []) m.set(p.id, p.title);
+    return m;
+  }, [data]);
+  const claimInfo = useMemo(() => {
+    const m = new Map<string, { text: string; paperId: string }>();
+    for (const p of data?.papers ?? [])
+      for (const c of p.claims) m.set(c.id, { text: c.text, paperId: p.id });
     return m;
   }, [data]);
 
@@ -113,13 +122,6 @@ export function SynthesisView({
     single: findings.filter((f) => f.consensus === "single-source").length,
   };
 
-  const selectedRelations = selectedPaperId
-    ? relations.filter(
-        (r) =>
-          r.fromPaperId === selectedPaperId || r.toPaperId === selectedPaperId,
-      )
-    : [];
-
   return (
     <motion.div
       initial={{ opacity: 0, y: 6 }}
@@ -153,75 +155,148 @@ export function SynthesisView({
 
       {/* Graph */}
       <section className="mt-6 rounded-xl border border-border bg-surface p-2">
-        <div className="flex flex-wrap items-center gap-4 px-3 pt-2 text-[12px] text-text-muted">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-3 pt-2 text-[12px] text-text-muted">
           <LegendDot color={RELATION_COLOR.supports} label="supports" />
           <LegendDot color={RELATION_COLOR.contradicts} label="contradicts" />
           <LegendDot color={RELATION_COLOR.extends} label="extends" />
-          <span className="ml-auto">click a paper to focus its connections</span>
+          <span className="flex items-center gap-1.5">
+            <span
+              className="inline-block h-2.5 w-2.5 rounded-full border border-dashed border-text-muted"
+              aria-hidden
+            />
+            open question
+          </span>
+          <span className="ml-auto">
+            scroll to zoom · drag to pan · zoom in to reveal claims
+          </span>
         </div>
         {edges.length === 0 && (
           <p className="px-3 py-2 text-[12px] text-text-muted">
             No cross-paper connections were found in this run.
           </p>
         )}
-        <RelationGraph
+        <TimelineGraph
           papers={papers}
           edges={edges}
-          selectedId={selectedPaperId}
-          onSelect={setSelectedPaperId}
+          relations={relations}
+          openQuestions={openQuestions}
+          selected={selected}
+          onSelect={setSelected}
         />
       </section>
 
-      {/* Selected paper detail */}
-      {selectedPaperId && (
+      {/* Selection detail (paper / claim / open question) */}
+      {selected && (
         <section className="mt-4 rounded-xl border border-accent/30 bg-accent-dim/40 p-4">
-          <div className="flex items-start justify-between gap-3">
-            <h3 className="text-[15px] font-medium text-text-primary">
-              {paperTitle.get(selectedPaperId) ?? "Paper"}
-            </h3>
-            <button
-              type="button"
-              onClick={() => setSelectedPaperId(null)}
-              className="text-[12px] text-text-muted transition-colors hover:text-text-primary"
-            >
-              close
-            </button>
-          </div>
-          {selectedRelations.length === 0 ? (
-            <p className="mt-2 text-[13px] text-text-muted">
-              This paper has no cross-paper claim relations in this run.
-            </p>
-          ) : (
-            <ul className="mt-3 space-y-3">
-              {selectedRelations.map((r) => {
-                const outgoing = r.fromPaperId === selectedPaperId;
-                const otherId = outgoing ? r.toPaperId : r.fromPaperId;
-                const type = r.relationType as keyof typeof RELATION_COLOR;
+          <DetailHeader onClose={() => setSelected(null)}>
+            {selected.kind === "paper" &&
+              (paperTitle.get(selected.id) ?? "Paper")}
+            {selected.kind === "claim" && "Claim"}
+            {selected.kind === "question" && "Open question"}
+          </DetailHeader>
+
+          {selected.kind === "paper" &&
+            (() => {
+              const rels = relations.filter(
+                (r) =>
+                  r.fromPaperId === selected.id || r.toPaperId === selected.id,
+              );
+              if (rels.length === 0)
                 return (
-                  <li
-                    key={r.id}
-                    className="border-l-2 pl-3 text-[13px]"
-                    style={{ borderColor: RELATION_COLOR[type] ?? "var(--border-strong)" }}
-                  >
-                    <span
-                      className="font-medium"
-                      style={{ color: RELATION_COLOR[type] ?? "var(--text-secondary)" }}
-                    >
-                      {r.relationType}
-                    </span>{" "}
-                    <span className="text-text-muted">
-                      {outgoing ? "→" : "←"} {paperTitle.get(otherId) ?? "paper"}
-                    </span>
-                    <p className="mt-1 text-text-primary">“{r.fromClaimText}”</p>
-                    <p className="text-text-secondary">“{r.toClaimText}”</p>
-                    {r.rationale && (
-                      <p className="mt-1 text-text-muted">{r.rationale}</p>
-                    )}
-                  </li>
+                  <p className="mt-2 text-[13px] text-text-muted">
+                    This paper has no cross-paper claim relations in this run.
+                  </p>
                 );
-              })}
-            </ul>
-          )}
+              return (
+                <ul className="mt-3 space-y-3">
+                  {rels.map((r) => {
+                    const outgoing = r.fromPaperId === selected.id;
+                    const otherId = outgoing ? r.toPaperId : r.fromPaperId;
+                    return (
+                      <RelationItem
+                        key={r.id}
+                        type={r.relationType}
+                        direction={outgoing ? "→" : "←"}
+                        other={paperTitle.get(otherId) ?? "paper"}
+                        fromText={r.fromClaimText}
+                        toText={r.toClaimText}
+                        rationale={r.rationale}
+                      />
+                    );
+                  })}
+                </ul>
+              );
+            })()}
+
+          {selected.kind === "claim" &&
+            (() => {
+              const info = claimInfo.get(selected.id);
+              const rels = relations.filter(
+                (r) =>
+                  r.fromClaimId === selected.id || r.toClaimId === selected.id,
+              );
+              return (
+                <div className="mt-2">
+                  <p className="text-[14px] text-text-primary">
+                    “{info?.text ?? "claim"}”
+                  </p>
+                  <p className="mt-1 text-[12px] text-text-muted">
+                    {paperTitle.get(info?.paperId ?? "") ?? ""}
+                  </p>
+                  {rels.length > 0 && (
+                    <ul className="mt-3 space-y-3">
+                      {rels.map((r) => {
+                        const outgoing = r.fromClaimId === selected.id;
+                        const otherId = outgoing
+                          ? r.toPaperId
+                          : r.fromPaperId;
+                        return (
+                          <RelationItem
+                            key={r.id}
+                            type={r.relationType}
+                            direction={outgoing ? "→" : "←"}
+                            other={paperTitle.get(otherId) ?? "paper"}
+                            fromText={r.fromClaimText}
+                            toText={r.toClaimText}
+                            rationale={r.rationale}
+                          />
+                        );
+                      })}
+                    </ul>
+                  )}
+                </div>
+              );
+            })()}
+
+          {selected.kind === "question" &&
+            (() => {
+              const q = openQuestions.find((x) => x.id === selected.id);
+              if (!q) return null;
+              return (
+                <div className="mt-2">
+                  <p className="text-[15px] font-medium text-text-primary">
+                    {q.question}
+                  </p>
+                  {q.rationale && (
+                    <p className="mt-2 text-[14px] leading-relaxed text-text-muted">
+                      {q.rationale}
+                    </p>
+                  )}
+                  {q.relatedPaperIds.length > 0 && (
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {q.relatedPaperIds.map((pid) => (
+                        <PaperChip
+                          key={pid}
+                          id={pid}
+                          paperTitle={paperTitle}
+                          onChip={selectPaper}
+                        />
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
         </section>
       )}
 
@@ -235,7 +310,7 @@ export function SynthesisView({
                 key={f.id}
                 finding={f}
                 paperTitle={paperTitle}
-                onChip={setSelectedPaperId}
+                onChip={selectPaper}
               />
             ))}
           </div>
@@ -252,7 +327,7 @@ export function SynthesisView({
                 key={q.id}
                 question={q}
                 paperTitle={paperTitle}
-                onChip={setSelectedPaperId}
+                onChip={selectPaper}
               />
             ))}
           </div>
@@ -269,7 +344,7 @@ export function SynthesisView({
                 key={t.id}
                 theme={t}
                 paperTitle={paperTitle}
-                onChip={setSelectedPaperId}
+                onChip={selectPaper}
               />
             ))}
           </div>
@@ -282,6 +357,58 @@ export function SynthesisView({
 function PanelLabel({ children }: { children: React.ReactNode }) {
   return (
     <h3 className="text-[13px] font-medium text-text-secondary">{children}</h3>
+  );
+}
+
+function DetailHeader({
+  children,
+  onClose,
+}: {
+  children: React.ReactNode;
+  onClose: () => void;
+}) {
+  return (
+    <div className="flex items-start justify-between gap-3">
+      <h3 className="text-[15px] font-medium text-text-primary">{children}</h3>
+      <button
+        type="button"
+        onClick={onClose}
+        className="shrink-0 text-[12px] text-text-muted transition-colors hover:text-text-primary"
+      >
+        close
+      </button>
+    </div>
+  );
+}
+
+function RelationItem({
+  type,
+  direction,
+  other,
+  fromText,
+  toText,
+  rationale,
+}: {
+  type: string;
+  direction: string;
+  other: string;
+  fromText: string;
+  toText: string;
+  rationale: string | null;
+}) {
+  const color = relationColor(type);
+  return (
+    <li className="border-l-2 pl-3 text-[13px]" style={{ borderColor: color }}>
+      <span className="font-medium" style={{ color }}>
+        {type}
+      </span>{" "}
+      <span className="text-text-muted">
+        {direction} {other}
+      </span>
+      <p className="mt-1 text-text-primary">“{fromText}”</p>
+      <p className="text-text-secondary">“{toText}”</p>
+      {rationale && <p className="mt-1 text-text-muted">{rationale}</p>}
+    </li>
   );
 }
 

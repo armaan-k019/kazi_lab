@@ -68,3 +68,13 @@ export const RELATION_LABEL: Record<RelationType, string> = {
   contradicts: "contradicts",
   extends: "extends",
 };
+
+export function relationColor(t: string): string {
+  return RELATION_COLOR[(t as RelationType)] ?? RELATION_COLOR.extends;
+}
+
+// What the user has focused in the graph; drives the detail panel.
+export type GraphSelection =
+  | { kind: "paper"; id: string }
+  | { kind: "claim"; id: string; paperId: string }
+  | { kind: "question"; id: string };
