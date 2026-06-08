@@ -27,6 +27,7 @@ export {
   getWorksByIds,
   getCitingWorks,
   getAuthorWorks,
+  searchWorks,
   type OpenAlexCandidate,
   type OpenAlexWork,
 } from "./openalex";
@@ -34,6 +35,16 @@ export {
   shapeCandidates,
   type DiscoveryCandidate,
 } from "./external-candidates";
+export {
+  findLibraryGaps,
+  type GapCandidate,
+  type GapConnection,
+  type LibraryGapsResult,
+} from "./gaps";
+export {
+  searchForOpenQuestion,
+  type QuestionSearchResult,
+} from "./question-search";
 export {
   resolvePaperExternal,
   type ExternalResolution,

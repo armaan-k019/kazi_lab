@@ -112,6 +112,25 @@ export type DiscoveryCandidate = {
   inCorpus: boolean;
 };
 export type ExternalAuthor = { id: string; name: string };
+
+export type GapConnection = {
+  type: "referenced" | "cites";
+  libraryPaperTitle: string;
+};
+export type GapCandidate = DiscoveryCandidate & {
+  connectionCount: number;
+  connections: GapConnection[];
+};
+export type LibraryGapsResult =
+  | { available: false; reason: string }
+  | { available: true; candidates: GapCandidate[] };
+
+export type QuestionSearchResult = {
+  found: true;
+  question: string;
+  searchQuery: string;
+  candidates: DiscoveryCandidate[];
+};
 export type PaperContext =
   | { available: false }
   | {

@@ -3,12 +3,14 @@
 import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import type {
+  QuestionSearchResult,
   SynthesisFinding,
   SynthesisOpenQuestion,
   SynthesisResults,
   SynthesisTheme,
 } from "@/lib/types";
 import { formatRelativeTime } from "@/lib/format";
+import { CandidateRow, Spinner } from "../candidate-row";
 import {
   aggregateEdges,
   relationColor,
@@ -361,6 +363,8 @@ export function SynthesisView({
                 question={q}
                 paperTitle={paperTitle}
                 onChip={selectPaper}
+                libraryId={libraryId}
+                libraryName={libraryName}
               />
             ))}
           </div>
@@ -543,11 +547,37 @@ function OpenQuestionCard({
   question,
   paperTitle,
   onChip,
+  libraryId,
+  libraryName,
 }: {
   question: SynthesisOpenQuestion;
   paperTitle: Map<string, string>;
   onChip: (id: string) => void;
+  libraryId: string;
+  libraryName: string;
 }) {
+  const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [result, setResult] = useState<QuestionSearchResult | null>(null);
+
+  const search = () => {
+    setOpen((v) => !v);
+    if (result || loading) return;
+    setLoading(true);
+    fetch(
+      `/api/external/question-search?questionId=${question.id}&libraryId=${libraryId}`,
+    )
+      .then(async (res) => {
+        const body = await res.json();
+        if (!res.ok) throw new Error(body.error ?? "Could not search.");
+        return body as QuestionSearchResult;
+      })
+      .then(setResult)
+      .catch((e: Error) => setError(e.message))
+      .finally(() => setLoading(false));
+  };
+
   return (
     <div className="rounded-xl border border-border bg-surface p-4">
       <p className="text-[15px] font-medium leading-snug text-text-primary">
@@ -568,6 +598,48 @@ function OpenQuestionCard({
               onChip={onChip}
             />
           ))}
+        </div>
+      )}
+
+      <button
+        type="button"
+        onClick={search}
+        className="mt-3 text-[12px] font-medium text-accent transition-opacity hover:opacity-80"
+      >
+        {open ? "hide recent work ▾" : "find recent work on this →"}
+      </button>
+
+      {open && (
+        <div className="mt-3 border-t border-border pt-3">
+          {loading && (
+            <p className="flex items-center gap-2 text-[12px] text-text-secondary">
+              <Spinner /> searching recent literature…
+            </p>
+          )}
+          {error && <p className="text-[12px] text-[#b4493b]">{error}</p>}
+          {result && (
+            <>
+              <p className="text-[12px] text-text-muted">
+                searched: <span className="text-text-secondary">{result.searchQuery}</span>
+              </p>
+              {result.candidates.length === 0 ? (
+                <p className="mt-2 text-[12px] text-text-muted">
+                  No recent work found beyond this library.
+                </p>
+              ) : (
+                <div className="mt-2 space-y-2">
+                  {result.candidates.map((c) => (
+                    <CandidateRow
+                      key={c.openalexId}
+                      candidate={c}
+                      libraryId={libraryId}
+                      libraryName={libraryName}
+                    />
+                  ))}
+                </div>
+              )}
+            </>
+          )}
         </div>
       )}
     </div>

@@ -223,6 +223,25 @@ export async function getCitingWorks(
   return (json?.results ?? []).map(mapWork);
 }
 
+// Full-text relevance search, optionally restricted to recent work. Returns
+// the richer work shape so results can be shaped into ingestable candidates.
+export async function searchWorks(
+  query: string,
+  opts: { fromDate?: string; perPage?: number } = {},
+): Promise<OpenAlexWork[]> {
+  const q = query.trim();
+  if (!q) return [];
+  const perPage = opts.perPage ?? 12;
+  let url =
+    `${BASE}/works?search=${encodeURIComponent(q)}` +
+    `&per-page=${perPage}&mailto=${encodeURIComponent(mailto())}`;
+  if (opts.fromDate) {
+    url += `&filter=from_publication_date:${opts.fromDate}`;
+  }
+  const json = (await getJson(url)) as { results?: RawWorkFull[] } | null;
+  return (json?.results ?? []).map(mapWork);
+}
+
 // An author's works, most cited first.
 export async function getAuthorWorks(
   authorId: string,

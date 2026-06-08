@@ -9,6 +9,7 @@ import { LibrarySwitcher } from "./library-switcher";
 import { SynthesisControl } from "./synthesis-control";
 import { SynthesisView } from "./synthesis/synthesis-view";
 import { ChatView } from "./chat-view";
+import { GapsView } from "./gaps-view";
 
 type IngestStage = "fetching" | "extracting" | "writing";
 const STAGES: IngestStage[] = ["fetching", "extracting", "writing"];
@@ -46,6 +47,7 @@ export function ScribeView() {
 
   const [viewingSynthesis, setViewingSynthesis] = useState(false);
   const [viewingChat, setViewingChat] = useState(false);
+  const [viewingGaps, setViewingGaps] = useState(false);
 
   const [url, setUrl] = useState("");
   const [working, setWorking] = useState(false);
@@ -359,6 +361,17 @@ export function ScribeView() {
             setSelectedId(id);
           }}
         />
+      ) : viewingGaps && activeLibraryId ? (
+        // "What am I missing", keyed by library so switching remounts it.
+        <GapsView
+          key={activeLibraryId}
+          libraryId={activeLibraryId}
+          libraryName={activeName}
+          onBack={() => setViewingGaps(false)}
+          onIngested={() => {
+            void refresh(activeLibraryId);
+          }}
+        />
       ) : (
         <>
           {/* Synthesis control, scoped to the active library. Keyed by library
@@ -373,15 +386,24 @@ export function ScribeView() {
             />
           )}
 
-          {/* Ask (grounded chat) entry, scoped to the active library. */}
+          {/* Library-level discovery entries, scoped to the active library. */}
           {activeLibraryId && (
-            <button
-              type="button"
-              onClick={() => setViewingChat(true)}
-              className="-mt-2 mb-5 text-[13px] text-accent transition-opacity hover:opacity-80"
-            >
-              ask this library →
-            </button>
+            <div className="-mt-2 mb-5 flex flex-wrap gap-x-5 gap-y-1.5">
+              <button
+                type="button"
+                onClick={() => setViewingChat(true)}
+                className="text-[13px] text-accent transition-opacity hover:opacity-80"
+              >
+                ask this library →
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewingGaps(true)}
+                className="text-[13px] text-accent transition-opacity hover:opacity-80"
+              >
+                what am I missing →
+              </button>
+            </div>
           )}
 
           {/* Ingestion bar (single URL, or multiple for a batch) */}
