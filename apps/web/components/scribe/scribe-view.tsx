@@ -8,6 +8,7 @@ import { PaperDetail } from "./paper-detail";
 import { LibrarySwitcher } from "./library-switcher";
 import { SynthesisControl } from "./synthesis-control";
 import { SynthesisView } from "./synthesis/synthesis-view";
+import { ChatView } from "./chat-view";
 
 type IngestStage = "fetching" | "extracting" | "writing";
 const STAGES: IngestStage[] = ["fetching", "extracting", "writing"];
@@ -44,6 +45,7 @@ export function ScribeView() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const [viewingSynthesis, setViewingSynthesis] = useState(false);
+  const [viewingChat, setViewingChat] = useState(false);
 
   const [url, setUrl] = useState("");
   const [working, setWorking] = useState(false);
@@ -335,6 +337,18 @@ export function ScribeView() {
           libraryName={activeName}
           onBack={() => setViewingSynthesis(false)}
         />
+      ) : viewingChat && activeLibraryId ? (
+        // Grounded chat, keyed by library so switching libraries resets it.
+        <ChatView
+          key={activeLibraryId}
+          libraryId={activeLibraryId}
+          libraryName={activeName}
+          onBack={() => setViewingChat(false)}
+          onOpenPaper={(id) => {
+            setViewingChat(false);
+            setSelectedId(id);
+          }}
+        />
       ) : (
         <>
           {/* Synthesis control, scoped to the active library. Keyed by library
@@ -347,6 +361,17 @@ export function ScribeView() {
               paperCount={activeLibrary?.paperCount ?? papers?.length ?? 0}
               onViewSynthesis={() => setViewingSynthesis(true)}
             />
+          )}
+
+          {/* Ask (grounded chat) entry, scoped to the active library. */}
+          {activeLibraryId && (
+            <button
+              type="button"
+              onClick={() => setViewingChat(true)}
+              className="-mt-2 mb-5 text-[13px] text-accent transition-opacity hover:opacity-80"
+            >
+              ask this library →
+            </button>
           )}
 
           {/* Ingestion bar (single URL, or multiple for a batch) */}

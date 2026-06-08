@@ -82,6 +82,20 @@ export type SynthesisLatest =
   | ({ runId: string; completedAt: string | null } & SynthesisCountSet)
   | null;
 
+export type ChatCitation = { paperId: string; paperTitle: string };
+export type ChatUsedChunk = {
+  paperTitle: string;
+  content: string;
+  similarity: number;
+  entityType: string;
+};
+export type ChatResponse = {
+  answer: string;
+  citations: ChatCitation[];
+  usedChunks: ChatUsedChunk[];
+  refused: boolean;
+};
+
 export type RelationType = "supports" | "contradicts" | "extends";
 
 export type SynthesisPaper = {

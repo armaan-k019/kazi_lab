@@ -209,6 +209,9 @@ importers:
 
   apps/web:
     dependencies:
+      '@anthropic-ai/sdk':
+        specifier: ^0.102.0
+        version: 0.102.0(zod@4.4.3)
       '@kazi-lab/db':
         specifier: workspace:*
         version: link:../../packages/db
