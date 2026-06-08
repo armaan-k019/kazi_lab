@@ -12,6 +12,30 @@ import { SynthesisView } from "./synthesis/synthesis-view";
 type IngestStage = "fetching" | "extracting" | "writing";
 const STAGES: IngestStage[] = ["fetching", "extracting", "writing"];
 
+// Spacing between sequential batch requests, to stay friendly to arXiv rate
+// limits (the fetcher's own retry/backoff handles transient 429/503).
+const BATCH_DELAY_MS = 5000;
+
+type BatchStatus = "queued" | "ingesting" | "done" | "failed";
+type BatchItem = {
+  url: string;
+  status: BatchStatus;
+  linkedExisting?: boolean;
+  claimsInserted?: number;
+  error?: string;
+};
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+// Split pasted text into a de-duplicated URL list (newline/comma separated).
+function parseUrls(raw: string): string[] {
+  const parts = raw
+    .split(/[\n,]+/)
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+  return [...new Set(parts)];
+}
+
 export function ScribeView() {
   const [libraries, setLibraries] = useState<Library[] | null>(null);
   const [activeLibraryId, setActiveLibraryId] = useState<string | null>(null);
@@ -26,6 +50,7 @@ export function ScribeView() {
   const [stage, setStage] = useState<IngestStage>("fetching");
   const [ingestError, setIngestError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [batch, setBatch] = useState<BatchItem[] | null>(null);
   const stageTimer = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const activeLibrary =
@@ -163,26 +188,39 @@ export function ScribeView() {
     if (activeLibraryId) await refresh(activeLibraryId);
   };
 
-  const handleIngest = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const value = url.trim();
-    if (!value || working || !activeLibraryId) return;
-
-    setWorking(true);
-    setIngestError(null);
-    setNotice(null);
-    startStageCycle();
-
-    try {
+  // One ingest call against the existing single-paper route.
+  const ingestOne = useCallback(
+    async (target: string): Promise<IngestResult> => {
       const res = await fetch("/api/scribe/ingest", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url: value, libraryId: activeLibraryId }),
+        body: JSON.stringify({ url: target, libraryId: activeLibraryId }),
       });
       const body = await res.json();
       if (!res.ok) throw new Error(body.error ?? "Ingestion failed.");
-      const result = body as IngestResult;
-      await refresh(activeLibraryId);
+      return body as IngestResult;
+    },
+    [activeLibraryId],
+  );
+
+  const patchBatch = (index: number, patch: Partial<BatchItem>) => {
+    setBatch((prev) =>
+      prev
+        ? prev.map((it, i) => (i === index ? { ...it, ...patch } : it))
+        : prev,
+    );
+  };
+
+  // Single URL: unchanged behavior (staged label + notice/error line).
+  const runSingle = async (target: string) => {
+    setWorking(true);
+    setIngestError(null);
+    setNotice(null);
+    setBatch(null);
+    startStageCycle();
+    try {
+      const result = await ingestOne(target);
+      if (activeLibraryId) await refresh(activeLibraryId);
       setUrl("");
       setNotice(
         result.linkedExisting
@@ -196,6 +234,79 @@ export function ScribeView() {
       setWorking(false);
     }
   };
+
+  // Multiple URLs: ingest sequentially with spacing; one failure never aborts
+  // the rest. Per-URL status updates live.
+  const runBatch = async (urls: string[]) => {
+    setWorking(true);
+    setIngestError(null);
+    setNotice(null);
+    setBatch(urls.map((u) => ({ url: u, status: "queued" as BatchStatus })));
+
+    for (let i = 0; i < urls.length; i++) {
+      if (i > 0) await sleep(BATCH_DELAY_MS);
+      patchBatch(i, { status: "ingesting" });
+      try {
+        const r = await ingestOne(urls[i]);
+        patchBatch(i, {
+          status: "done",
+          linkedExisting: r.linkedExisting,
+          claimsInserted: r.claimsInserted,
+        });
+      } catch (err) {
+        patchBatch(i, { status: "failed", error: (err as Error).message });
+      }
+    }
+
+    if (activeLibraryId) await refresh(activeLibraryId);
+    setUrl("");
+    setWorking(false);
+  };
+
+  // Retry a single failed row after the batch settles.
+  const retryItem = async (index: number) => {
+    if (working || !batch) return;
+    const item = batch[index];
+    if (!item) return;
+    setWorking(true);
+    patchBatch(index, { status: "ingesting", error: undefined });
+    try {
+      const r = await ingestOne(item.url);
+      patchBatch(index, {
+        status: "done",
+        linkedExisting: r.linkedExisting,
+        claimsInserted: r.claimsInserted,
+      });
+      if (activeLibraryId) await refresh(activeLibraryId);
+    } catch (err) {
+      patchBatch(index, { status: "failed", error: (err as Error).message });
+    } finally {
+      setWorking(false);
+    }
+  };
+
+  const handleIngest = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (working || !activeLibraryId) return;
+    const urls = parseUrls(url);
+    if (urls.length === 0) return;
+    if (urls.length === 1) {
+      await runSingle(urls[0]);
+    } else {
+      await runBatch(urls);
+    }
+  };
+
+  const parsedCount = parseUrls(url).length;
+  const batchSummary = batch
+    ? {
+        ingested: batch.filter((b) => b.status === "done" && !b.linkedExisting)
+          .length,
+        linked: batch.filter((b) => b.status === "done" && b.linkedExisting)
+          .length,
+        failed: batch.filter((b) => b.status === "failed").length,
+      }
+    : null;
 
   if (selectedId) {
     return <PaperDetail id={selectedId} onBack={() => setSelectedId(null)} />;
@@ -238,48 +349,65 @@ export function ScribeView() {
             />
           )}
 
-          {/* Ingestion bar */}
-          <form onSubmit={handleIngest} className="flex flex-col gap-2.5">
-        <div className="flex gap-2.5">
-          <input
-            type="text"
-            value={url}
-            onChange={(e) => setUrl(e.target.value)}
-            disabled={working}
-            placeholder="Paste any URL (arXiv, PDF, or article)"
-            spellCheck={false}
-            className="flex-1 rounded-lg border border-border bg-surface px-4 py-2.5 text-sm text-text-primary placeholder:text-text-muted focus:border-accent/50 focus:outline-none focus:ring-2 focus:ring-accent/15 disabled:opacity-60"
-          />
-          <button
-            type="submit"
-            disabled={working || url.trim().length === 0}
-            className="rounded-lg bg-accent px-5 py-2.5 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:cursor-default disabled:opacity-40"
-          >
-            Ingest
-          </button>
-        </div>
+          {/* Ingestion bar (single URL, or multiple for a batch) */}
+          <form onSubmit={handleIngest} className="flex flex-col gap-2">
+            <div className="flex items-start gap-2.5">
+              <textarea
+                value={url}
+                onChange={(e) => setUrl(e.target.value)}
+                disabled={working}
+                rows={parsedCount > 1 ? Math.min(parsedCount + 1, 8) : 2}
+                placeholder="Paste any URL (arXiv, PDF, or article)"
+                spellCheck={false}
+                className="flex-1 resize-y rounded-lg border border-border bg-surface px-4 py-2.5 text-sm leading-relaxed text-text-primary placeholder:text-text-muted focus:border-accent/50 focus:outline-none focus:ring-2 focus:ring-accent/15 disabled:opacity-60"
+              />
+              <button
+                type="submit"
+                disabled={working || parsedCount === 0}
+                className="rounded-lg bg-accent px-5 py-2.5 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:cursor-default disabled:opacity-40"
+              >
+                {parsedCount > 1 ? `Ingest ${parsedCount}` : "Ingest"}
+              </button>
+            </div>
 
-        <div className="flex h-5 items-center gap-2 text-[13px]">
-          {working && (
-            <span className="flex items-center gap-2 text-text-secondary">
-              <Spinner />
-              {stage}…
-            </span>
+            <p className="text-[12px] text-text-muted">
+              One URL per line for batch.
+            </p>
+
+            {/* Single-ingest status line (hidden while a batch is shown) */}
+            {!batch && (
+              <div className="flex h-5 items-center gap-2 text-[13px]">
+                {working && (
+                  <span className="flex items-center gap-2 text-text-secondary">
+                    <Spinner />
+                    {stage}…
+                  </span>
+                )}
+                {!working && ingestError && (
+                  <span className="text-text-secondary">{ingestError}</span>
+                )}
+                {!working && !ingestError && notice && (
+                  <span className="text-text-muted">{notice}</span>
+                )}
+                {!working && !ingestError && !notice && (
+                  <span className="text-text-muted">
+                    Ingesting into{" "}
+                    <span className="text-accent">{activeName}</span>
+                  </span>
+                )}
+              </div>
+            )}
+          </form>
+
+          {/* Batch progress + per-URL results */}
+          {batch && (
+            <BatchProgress
+              items={batch}
+              working={working}
+              summary={batchSummary}
+              onRetry={retryItem}
+            />
           )}
-          {!working && ingestError && (
-            <span className="text-text-secondary">{ingestError}</span>
-          )}
-          {!working && !ingestError && notice && (
-            <span className="text-text-muted">{notice}</span>
-          )}
-          {!working && !ingestError && !notice && (
-            <span className="text-text-muted">
-              Ingesting into{" "}
-              <span className="text-accent">{activeName}</span>
-            </span>
-          )}
-        </div>
-      </form>
 
       {/* Corpus list */}
       <div className="mt-8">
@@ -445,5 +573,90 @@ function Spinner() {
       className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-border border-t-accent"
       aria-hidden="true"
     />
+  );
+}
+
+function BatchProgress({
+  items,
+  working,
+  summary,
+  onRetry,
+}: {
+  items: BatchItem[];
+  working: boolean;
+  summary: { ingested: number; linked: number; failed: number } | null;
+  onRetry: (index: number) => void;
+}) {
+  return (
+    <div className="mt-3 rounded-xl border border-border bg-surface p-3">
+      {working ? (
+        <p className="mb-2 px-1 text-[13px] text-text-muted">
+          Ingesting {items.length} sources sequentially…
+        </p>
+      ) : (
+        summary && (
+          <p className="mb-2 px-1 text-[13px] text-text-secondary">
+            <span className="text-accent">{summary.ingested} ingested</span>
+            {", "}
+            <span className="text-text-muted">{summary.linked} linked</span>
+            {", "}
+            <span
+              className={
+                summary.failed > 0 ? "text-[#b4493b]" : "text-text-muted"
+              }
+            >
+              {summary.failed} failed
+            </span>
+          </p>
+        )
+      )}
+      <ul className="divide-y divide-border">
+        {items.map((it, i) => (
+          <li
+            key={`${i}-${it.url}`}
+            className="flex items-center justify-between gap-3 px-1 py-2 text-[13px]"
+          >
+            <span className="min-w-0 flex-1 truncate text-text-secondary">
+              {it.url}
+            </span>
+            <span className="shrink-0">
+              {it.status === "queued" && (
+                <span className="text-text-muted">queued</span>
+              )}
+              {it.status === "ingesting" && (
+                <span className="flex items-center gap-1.5 text-text-secondary">
+                  <Spinner /> ingesting…
+                </span>
+              )}
+              {it.status === "done" &&
+                (it.linkedExisting ? (
+                  <span className="text-text-muted">
+                    added · already in corpus
+                  </span>
+                ) : (
+                  <span className="text-accent">
+                    ingested · {it.claimsInserted ?? 0} claims
+                  </span>
+                ))}
+              {it.status === "failed" && (
+                <span className="flex items-center gap-2">
+                  <span className="text-[#b4493b]">
+                    {it.error ?? "failed"}
+                  </span>
+                  <button
+                    type="button"
+                    disabled={working}
+                    onClick={() => onRetry(i)}
+                    className="text-text-muted transition-colors hover:text-accent disabled:opacity-40"
+                  >
+                    retry
+                  </button>
+                </span>
+              )}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }
