@@ -6,6 +6,7 @@ import type { IngestResult, Library, PaperSummary } from "@/lib/types";
 import { formatAuthors, formatPublished, formatTimestamp } from "@/lib/format";
 import { PaperDetail } from "./paper-detail";
 import { LibrarySwitcher } from "./library-switcher";
+import { SynthesisControl } from "./synthesis-control";
 
 type IngestStage = "fetching" | "extracting" | "writing";
 const STAGES: IngestStage[] = ["fetching", "extracting", "writing"];
@@ -210,6 +211,17 @@ export function ScribeView() {
             onDelete={handleDeleteLibrary}
           />
         </div>
+      )}
+
+      {/* Synthesis control, scoped to the active library. Keyed by library id so
+          switching libraries remounts it (resets state, cancels stale polls). */}
+      {activeLibraryId && (
+        <SynthesisControl
+          key={activeLibraryId}
+          libraryId={activeLibraryId}
+          libraryName={activeName}
+          paperCount={activeLibrary?.paperCount ?? papers?.length ?? 0}
+        />
       )}
 
       {/* Ingestion bar */}

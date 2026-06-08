@@ -61,3 +61,23 @@ export type Library = {
   createdAt: string;
   paperCount: number;
 };
+
+export type SynthesisCountSet = {
+  themeCount: number;
+  findingCount: number;
+  relationCount: number;
+  openQuestionCount: number;
+};
+
+export type SynthesisStatus = {
+  runId: string;
+  status: "running" | "completed" | "failed";
+  error: string | null;
+  startedAt: string;
+  completedAt: string | null;
+  counts: SynthesisCountSet | null;
+};
+
+export type SynthesisLatest =
+  | ({ runId: string; completedAt: string | null } & SynthesisCountSet)
+  | null;

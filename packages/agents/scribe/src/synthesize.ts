@@ -85,10 +85,9 @@ function stripJsonFence(text: string): string {
   return fenced ? fenced[1].trim() : trimmed;
 }
 
-export async function synthesizeLibrary(
-  libraryId: string,
-): Promise<SynthesisCounts> {
-  // --- Gather the library's corpus ---------------------------------------
+// Step 1: validate the library has >=2 papers and create the run row. Returns
+// the runId immediately so an API route can respond before the heavy work.
+export async function createSynthesisRun(libraryId: string): Promise<string> {
   const [library] = await db
     .select({ id: libraries.id, name: libraries.name })
     .from(libraries)
@@ -96,91 +95,90 @@ export async function synthesizeLibrary(
     .limit(1);
   if (!library) throw new Error(`Library not found: ${libraryId}`);
 
-  const libPapers = await db
-    .select({
-      id: papers.id,
-      title: papers.title,
-      authors: papers.authors,
-    })
+  const paperRows = await db
+    .select({ id: papers.id })
     .from(papers)
     .innerJoin(paperLibraries, eq(paperLibraries.paperId, papers.id))
     .where(eq(paperLibraries.libraryId, libraryId));
 
-  const paperIds = libPapers.map((p) => p.id);
-  const validPaperIds = new Set(paperIds);
-
-  const exts = paperIds.length
-    ? await db
-        .select({
-          paperId: extractions.paperId,
-          problem: extractions.problem,
-          method: extractions.method,
-          results: extractions.results,
-          limitations: extractions.limitations,
-          keyTerms: extractions.keyTerms,
-        })
-        .from(extractions)
-        .where(inArray(extractions.paperId, paperIds))
-    : [];
-  const extByPaper = new Map(exts.map((e) => [e.paperId, e]));
-
-  const allClaims = paperIds.length
-    ? await db
-        .select({
-          id: claims.id,
-          paperId: claims.paperId,
-          text: claims.text,
-          sourcePassage: claims.sourcePassage,
-          confidence: claims.confidence,
-        })
-        .from(claims)
-        .where(inArray(claims.paperId, paperIds))
-    : [];
-  const validClaimIds = new Set(allClaims.map((c) => c.id));
-  const claimPaper = new Map(allClaims.map((c) => [c.id, c.paperId]));
-  const claimsByPaper = new Map<string, typeof allClaims>();
-  for (const c of allClaims) {
-    const arr = claimsByPaper.get(c.paperId) ?? [];
-    arr.push(c);
-    claimsByPaper.set(c.paperId, arr);
+  if (paperRows.length < 2) {
+    throw new Error("Synthesis needs at least 2 papers.");
   }
 
-  // --- Create the run row -------------------------------------------------
   const [run] = await db
     .insert(synthesisRuns)
     .values({
       libraryId,
       status: "running",
       model: MODEL,
-      paperCount: libPapers.length,
+      paperCount: paperRows.length,
     })
     .returning({ id: synthesisRuns.id });
-  const runId = run.id;
+  return run.id;
+}
 
-  const empty: SynthesisCounts = {
-    runId,
-    themeCount: 0,
-    findingCount: 0,
-    relationCount: 0,
-    openQuestionCount: 0,
-  };
-
-  // Synthesis needs at least 2 papers to find connections.
-  if (libPapers.length < 2) {
-    await db
-      .update(synthesisRuns)
-      .set({
-        status: "failed",
-        completedAt: new Date(),
-        error: "Need at least 2 papers to synthesize.",
-        notes: `Library "${library.name}" has ${libPapers.length} paper(s).`,
-      })
-      .where(eq(synthesisRuns.id, runId));
-    return empty;
-  }
+// Step 2: the heavy work. Reads the libraryId from the run row, gathers the
+// corpus, calls Opus, writes results in a transaction, and marks the run
+// completed or failed. On error it marks the run failed and rethrows.
+export async function runSynthesis(runId: string): Promise<SynthesisCounts> {
+  const [run] = await db
+    .select({ id: synthesisRuns.id, libraryId: synthesisRuns.libraryId })
+    .from(synthesisRuns)
+    .where(eq(synthesisRuns.id, runId))
+    .limit(1);
+  if (!run) throw new Error(`Synthesis run not found: ${runId}`);
+  if (!run.libraryId) throw new Error(`Run ${runId} has no library.`);
+  const libraryId = run.libraryId;
 
   try {
-    // --- Build the corpus document ---------------------------------------
+    const [library] = await db
+      .select({ id: libraries.id, name: libraries.name })
+      .from(libraries)
+      .where(eq(libraries.id, libraryId))
+      .limit(1);
+    if (!library) throw new Error(`Library not found: ${libraryId}`);
+
+    const libPapers = await db
+      .select({ id: papers.id, title: papers.title, authors: papers.authors })
+      .from(papers)
+      .innerJoin(paperLibraries, eq(paperLibraries.paperId, papers.id))
+      .where(eq(paperLibraries.libraryId, libraryId));
+
+    const paperIds = libPapers.map((p) => p.id);
+    const validPaperIds = new Set(paperIds);
+
+    const exts = await db
+      .select({
+        paperId: extractions.paperId,
+        problem: extractions.problem,
+        method: extractions.method,
+        results: extractions.results,
+        limitations: extractions.limitations,
+        keyTerms: extractions.keyTerms,
+      })
+      .from(extractions)
+      .where(inArray(extractions.paperId, paperIds));
+    const extByPaper = new Map(exts.map((e) => [e.paperId, e]));
+
+    const allClaims = await db
+      .select({
+        id: claims.id,
+        paperId: claims.paperId,
+        text: claims.text,
+        sourcePassage: claims.sourcePassage,
+        confidence: claims.confidence,
+      })
+      .from(claims)
+      .where(inArray(claims.paperId, paperIds));
+    const validClaimIds = new Set(allClaims.map((c) => c.id));
+    const claimPaper = new Map(allClaims.map((c) => [c.id, c.paperId]));
+    const claimsByPaper = new Map<string, typeof allClaims>();
+    for (const c of allClaims) {
+      const arr = claimsByPaper.get(c.paperId) ?? [];
+      arr.push(c);
+      claimsByPaper.set(c.paperId, arr);
+    }
+
     const corpus = libPapers
       .map((p) => {
         const e = extByPaper.get(p.id);
@@ -207,7 +205,6 @@ export async function synthesizeLibrary(
 
     const userMessage = `Library: ${library.name}\nPapers: ${libPapers.length}\n\n${corpus}`;
 
-    // --- Call Opus -------------------------------------------------------
     const client = new Anthropic();
     const response = await client.messages.create({
       model: MODEL,
@@ -228,11 +225,9 @@ export async function synthesizeLibrary(
       );
     }
 
-    // --- Write results in a transaction ----------------------------------
     let relationCount = 0;
     let skippedRelations = 0;
     const counts = await db.transaction(async (tx) => {
-      // Themes + paper_themes
       const themeRows = parsed.themes ?? [];
       for (const t of themeRows) {
         if (!t?.name) continue;
@@ -252,7 +247,6 @@ export async function synthesizeLibrary(
         }
       }
 
-      // Findings + finding_papers
       const findingRows = parsed.findings ?? [];
       for (const f of findingRows) {
         if (!f?.statement) continue;
@@ -268,7 +262,6 @@ export async function synthesizeLibrary(
         const supports = (f.supports ?? []).filter((s) =>
           validPaperIds.has(s.paper_id),
         );
-        // Dedupe by paper (finding_papers PK is finding_id + paper_id).
         const seen = new Set<string>();
         for (const s of supports) {
           if (seen.has(s.paper_id)) continue;
@@ -286,8 +279,6 @@ export async function synthesizeLibrary(
         }
       }
 
-      // Claim relations: only when both ids exist, are different, and come
-      // from different papers.
       const relationRows = parsed.relations ?? [];
       for (const r of relationRows) {
         const from = r?.from_claim_id;
@@ -313,7 +304,6 @@ export async function synthesizeLibrary(
         relationCount++;
       }
 
-      // Open questions
       const oqRows = parsed.open_questions ?? [];
       for (const q of oqRows) {
         if (!q?.question) continue;
@@ -355,4 +345,12 @@ export async function synthesizeLibrary(
       .where(eq(synthesisRuns.id, runId));
     throw error;
   }
+}
+
+// CLI / single-call entry: create the run then do the work, awaited.
+export async function synthesizeLibrary(
+  libraryId: string,
+): Promise<SynthesisCounts> {
+  const runId = await createSynthesisRun(libraryId);
+  return runSynthesis(runId);
 }
