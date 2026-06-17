@@ -18,15 +18,53 @@ import {
 } from "@kazi-lab/db";
 
 // Synthesis is the judgment-heavy task, so it uses Opus (per-paper extraction
-// uses Sonnet). claude-opus-4-6 is a current, valid Opus model.
+// uses Sonnet). claude-opus-4-6 is a current, valid Opus model with a 128k
+// max output limit (verified against Anthropic model docs).
 const MODEL = "claude-opus-4-6";
-const MAX_TOKENS = 16000;
+
+// Output token budget scales with paper count: the synthesis JSON
+// (themes/findings/relations/open-questions) grows with the corpus. At ~6
+// papers ~16k held comfortably; this formula gives clear headroom through
+// ~20-30 papers while staying well under Opus 4.6's 128k output ceiling. The
+// truncation guard in runSynthesis is the backstop if this is ever exceeded.
+//   maxTokens = min(BASE + perPaper * paperCount, CAP)
+// At 6 papers => 19.2k, 13 => 27.6k, 20 => capped at 32k.
+const SYNTHESIS_BASE_TOKENS = 12_000;
+const SYNTHESIS_TOKENS_PER_PAPER = 1_200;
+const SYNTHESIS_MAX_OUTPUT_CAP = 32_000; // generous; Opus 4.6 allows up to 128k
+function synthesisMaxTokens(paperCount: number): number {
+  return Math.min(
+    SYNTHESIS_BASE_TOKENS + paperCount * SYNTHESIS_TOKENS_PER_PAPER,
+    SYNTHESIS_MAX_OUTPUT_CAP,
+  );
+}
+
+// Extended thinking is left OFF on the synthesis call. Opus 4.6 adaptive
+// thinking draws from the same max_tokens budget as the JSON output and chooses
+// its own depth, which makes an untruncated, parseable JSON harder to
+// guarantee. Correctness (a complete synthesis) is the priority here, so we
+// rely on the raised max_tokens above rather than enabling thinking.
+
+// SCALING NOTE: whole-corpus synthesis (every paper + every claim in one Opus
+// pass) is fine to roughly 20-30 papers; ~20 papers (~120 claims) fits the 1M
+// context easily. Beyond that the next step is hierarchical / chunked synthesis
+// (synthesize sub-clusters, then synthesize their summaries). Not built here;
+// flagged as the next scaling step.
 
 // Narration is descriptive writing grounded in the already-computed relations,
 // not the hard cross-paper judgment Opus already did, so Sonnet is enough and
-// cheaper.
+// cheaper. Its single-call output (one entry per paper) also grows with paper
+// count, so scale its budget too, capped well under Sonnet 4.6's 64k ceiling.
 const NARRATION_MODEL = "claude-sonnet-4-6";
-const NARRATION_MAX_TOKENS = 4000;
+const NARRATION_BASE_TOKENS = 2_000;
+const NARRATION_TOKENS_PER_PAPER = 400;
+const NARRATION_MAX_OUTPUT_CAP = 16_000;
+function narrationMaxTokens(paperCount: number): number {
+  return Math.min(
+    NARRATION_BASE_TOKENS + paperCount * NARRATION_TOKENS_PER_PAPER,
+    NARRATION_MAX_OUTPUT_CAP,
+  );
+}
 
 const NARRATION_PROMPT = `You are writing short positioning notes for papers in a research library. For each paper, write 2-4 sentences describing its place in THIS library's web of relationships: what it builds on or extends, what it is supported by or contradicts or is contradicted by, and its distinct contribution relative to the OTHER papers in this library. Ground every statement in the provided relations and corpus. Do not restate the paper's abstract in isolation; position it relative to its neighbors. Be specific and concise. If a paper has few or no relations, say briefly that it stands relatively independent in this library and note its core contribution. Return ONLY JSON: { "narrations": [ { "paper_id": "...", "narration": "..." } ] }, one entry per paper id provided. Never invent relations not present in the data.`;
 
@@ -50,7 +88,11 @@ async function generateNarrations(
   }[],
   relations: RelEntry[],
   validPaperIds: Set<string>,
-): Promise<{ paperId: string; narration: string }[]> {
+  maxTokens: number,
+): Promise<{
+  narrations: { paperId: string; narration: string }[];
+  truncated: boolean;
+}> {
   const titleOf = new Map(papersInfo.map((p) => [p.id, p.title]));
   const doc = papersInfo
     .map((p) => {
@@ -78,21 +120,31 @@ async function generateNarrations(
     .join("\n\n");
 
   const client = new Anthropic();
-  const response = await client.messages.create({
-    model: NARRATION_MODEL,
-    max_tokens: NARRATION_MAX_TOKENS,
-    system: NARRATION_PROMPT,
-    messages: [
-      { role: "user", content: `Library: ${libraryName}\n\n${doc}` },
-    ],
-  });
+  // Stream and take the final message (same reason as the synthesis call: the
+  // scaled max_tokens can exceed the SDK's non-streaming timeout limit).
+  const response = await client.messages
+    .stream({
+      model: NARRATION_MODEL,
+      max_tokens: maxTokens,
+      system: NARRATION_PROMPT,
+      messages: [{ role: "user", content: `Library: ${libraryName}\n\n${doc}` }],
+    })
+    .finalMessage();
+  const truncated = response.stop_reason === "max_tokens";
   const block = response.content.find((b) => b.type === "text");
   const raw = block && block.type === "text" ? block.text : "";
   const fenced = raw.trim().match(/^```(?:json)?\s*([\s\S]*?)\s*```$/);
-  const parsed = JSON.parse(fenced ? fenced[1].trim() : raw.trim()) as {
-    narrations?: { paper_id?: string; narration?: string }[];
-  };
-  return (parsed.narrations ?? [])
+  let parsed: { narrations?: { paper_id?: string; narration?: string }[] };
+  try {
+    parsed = JSON.parse(fenced ? fenced[1].trim() : raw.trim());
+  } catch (parseErr) {
+    // If truncation broke the JSON, degrade gracefully: store nothing and let
+    // the caller record a note (narration is supplementary). A non-truncation
+    // parse failure is a real error worth surfacing to the caller's catch.
+    if (truncated) return { narrations: [], truncated: true };
+    throw parseErr;
+  }
+  const narrations = (parsed.narrations ?? [])
     .filter(
       (n): n is { paper_id: string; narration: string } =>
         typeof n?.paper_id === "string" &&
@@ -101,6 +153,7 @@ async function generateNarrations(
         validPaperIds.has(n.paper_id),
     )
     .map((n) => ({ paperId: n.paper_id, narration: n.narration.trim() }));
+  return { narrations, truncated };
 }
 
 export type SynthesisCounts = {
@@ -287,14 +340,23 @@ export async function runSynthesis(runId: string): Promise<SynthesisCounts> {
 
     const userMessage = `Library: ${library.name}\nPapers: ${libPapers.length}\n\n${corpus}`;
 
+    const synthMaxTokens = synthesisMaxTokens(libPapers.length);
     const client = new Anthropic();
-    const response = await client.messages.create({
-      model: MODEL,
-      max_tokens: MAX_TOKENS,
-      system: SYSTEM_PROMPT,
-      messages: [{ role: "user", content: userMessage }],
-    });
+    // Stream and take the final message: at these max_tokens the SDK rejects a
+    // non-streaming request (it could exceed the socket timeout). finalMessage()
+    // returns the same Message shape (content + stop_reason) we check below.
+    const response = await client.messages
+      .stream({
+        model: MODEL,
+        max_tokens: synthMaxTokens,
+        system: SYSTEM_PROMPT,
+        messages: [{ role: "user", content: userMessage }],
+      })
+      .finalMessage();
 
+    // Truncation guard: stop_reason "max_tokens" means the model hit the output
+    // ceiling rather than completing, so the JSON is likely incomplete.
+    const truncated = response.stop_reason === "max_tokens";
     const textBlock = response.content.find((b) => b.type === "text");
     const raw = textBlock && textBlock.type === "text" ? textBlock.text : "";
 
@@ -302,10 +364,24 @@ export async function runSynthesis(runId: string): Promise<SynthesisCounts> {
     try {
       parsed = JSON.parse(stripJsonFence(raw)) as RawSynthesis;
     } catch (parseErr) {
+      // If the output was truncated and the JSON is therefore unparseable, fail
+      // cleanly with a clear, actionable note rather than writing partial
+      // garbage. The outer catch marks the run failed with this message.
+      if (truncated) {
+        throw new Error(
+          `Synthesis output truncated at ${libPapers.length} papers: hit the ${synthMaxTokens}-token output ceiling and the JSON is incomplete, so no results were written. Consider hierarchical synthesis for libraries this large.`,
+        );
+      }
       throw new Error(
         `Failed to parse synthesis JSON: ${(parseErr as Error).message}\n\nRaw response:\n${raw.slice(0, 4000)}`,
       );
     }
+
+    // If the output was truncated but still parsed (valid but partial), accept
+    // what parsed and flag the run so the incompleteness is visible.
+    const truncationNote = truncated
+      ? `Synthesis output truncated at ${libPapers.length} papers (hit the ${synthMaxTokens}-token ceiling); results may be incomplete. Consider hierarchical synthesis.`
+      : null;
 
     let relationCount = 0;
     let skippedRelations = 0;
@@ -416,31 +492,42 @@ export async function runSynthesis(runId: string): Promise<SynthesisCounts> {
       };
     });
 
+    // Accumulate run notes so id-skips, synthesis truncation, and narration
+    // outcomes all surface on the run row.
+    const runNotes: string[] = [];
+    if (skippedRelations) {
+      runNotes.push(
+        `Skipped ${skippedRelations} relation(s) with invalid/same-paper claim ids.`,
+      );
+    }
+    if (truncationNote) runNotes.push(truncationNote);
+
     await db
       .update(synthesisRuns)
       .set({
         status: "completed",
         completedAt: new Date(),
-        notes: skippedRelations
-          ? `Skipped ${skippedRelations} relation(s) with invalid/same-paper claim ids.`
-          : null,
+        notes: runNotes.length ? runNotes.join(" ") : null,
       })
       .where(eq(synthesisRuns.id, runId));
 
     // Narration is supplementary: generate and store per-paper positioning
-    // paragraphs, but never fail the (already completed) run if it errors.
+    // paragraphs, but never fail the (already completed) run if it errors. If
+    // its single-call output truncates, store whatever parsed and note it.
     try {
-      const narrations = await generateNarrations(
-        library.name,
-        libPapers.map((p) => ({
-          id: p.id,
-          title: p.title,
-          problem: extByPaper.get(p.id)?.problem ?? null,
-          method: extByPaper.get(p.id)?.method ?? null,
-        })),
-        validRelations,
-        validPaperIds,
-      );
+      const { narrations, truncated: narrationTruncated } =
+        await generateNarrations(
+          library.name,
+          libPapers.map((p) => ({
+            id: p.id,
+            title: p.title,
+            problem: extByPaper.get(p.id)?.problem ?? null,
+            method: extByPaper.get(p.id)?.method ?? null,
+          })),
+          validRelations,
+          validPaperIds,
+          narrationMaxTokens(libPapers.length),
+        );
       if (narrations.length) {
         await db.insert(paperNarrations).values(
           narrations.map((n) => ({
@@ -450,15 +537,23 @@ export async function runSynthesis(runId: string): Promise<SynthesisCounts> {
           })),
         );
       }
+      if (narrationTruncated) {
+        runNotes.push(
+          `Narration output truncated at ${libPapers.length} papers; stored ${narrations.length} narration(s), remaining papers have none.`,
+        );
+        await db
+          .update(synthesisRuns)
+          .set({ notes: runNotes.join(" ") })
+          .where(eq(synthesisRuns.id, runId));
+      }
       console.log(`Wrote ${narrations.length} paper narrations.`);
     } catch (narrErr) {
       const msg = narrErr instanceof Error ? narrErr.message : String(narrErr);
       console.error("Narration step failed (run still completed):", msg);
+      runNotes.push(`Narration failed: ${msg.slice(0, 200)}`);
       await db
         .update(synthesisRuns)
-        .set({
-          notes: `${skippedRelations ? `Skipped ${skippedRelations} relation(s). ` : ""}Narration failed: ${msg.slice(0, 200)}`,
-        })
+        .set({ notes: runNotes.join(" ") })
         .where(eq(synthesisRuns.id, runId));
     }
 
