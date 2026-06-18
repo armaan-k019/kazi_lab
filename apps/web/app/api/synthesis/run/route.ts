@@ -1,5 +1,8 @@
 import { NextResponse } from "next/server";
+import { eq } from "drizzle-orm";
+import { db, libraries } from "@kazi-lab/db";
 import { createSynthesisRun, runSynthesis } from "@kazi-lab/scribe";
+import { isAllPapersLibrary } from "@/lib/library";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -28,6 +31,23 @@ export async function POST(request: Request) {
       : undefined;
   if (typeof libraryId !== "string" || libraryId.length === 0) {
     return NextResponse.json({ error: "libraryId is required." }, { status: 400 });
+  }
+
+  // Defense in depth: general is an all-papers view and is never synthesized.
+  // The UI does not offer this for general; reject it here regardless.
+  const [lib] = await db
+    .select({ name: libraries.name })
+    .from(libraries)
+    .where(eq(libraries.id, libraryId))
+    .limit(1);
+  if (lib && isAllPapersLibrary(lib.name)) {
+    return NextResponse.json(
+      {
+        error:
+          "The general library is an all-papers view and is not synthesized.",
+      },
+      { status: 422 },
+    );
   }
 
   let runId: string;

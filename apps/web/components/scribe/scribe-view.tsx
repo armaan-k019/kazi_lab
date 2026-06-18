@@ -10,6 +10,7 @@ import { SynthesisControl } from "./synthesis-control";
 import { SynthesisView } from "./synthesis/synthesis-view";
 import { ChatView } from "./chat-view";
 import { GapsView } from "./gaps-view";
+import { isAllPapersLibrary } from "@/lib/library";
 
 type IngestStage = "fetching" | "extracting" | "writing";
 const STAGES: IngestStage[] = ["fetching", "extracting", "writing"];
@@ -60,6 +61,9 @@ export function ScribeView() {
   const activeLibrary =
     libraries?.find((l) => l.id === activeLibraryId) ?? null;
   const activeName = activeLibrary?.name ?? "library";
+  // general is a plain "all papers" view, not a synthesizable research library,
+  // so its synthesis + discovery controls are hidden (see isAllPapersLibrary).
+  const isGeneral = isAllPapersLibrary(activeLibrary?.name);
 
   const fetchLibraries = useCallback(async (): Promise<Library[]> => {
     const res = await fetch("/api/libraries");
@@ -95,7 +99,7 @@ export function ScribeView() {
       try {
         const libs = await fetchLibraries();
         setLibraries(libs);
-        const general = libs.find((l) => l.name === "general") ?? libs[0];
+        const general = libs.find((l) => isAllPapersLibrary(l.name)) ?? libs[0];
         setActiveLibraryId(general?.id ?? null);
       } catch (e) {
         setLoadError((e as Error).message);
@@ -163,7 +167,7 @@ export function ScribeView() {
     if (!res.ok) throw new Error(body.error ?? "Could not delete the library.");
     const libs = await fetchLibraries();
     setLibraries(libs);
-    const general = libs.find((l) => l.name === "general") ?? libs[0];
+    const general = libs.find((l) => isAllPapersLibrary(l.name)) ?? libs[0];
     setActiveLibraryId(general?.id ?? null); // fall back to general
   };
 
@@ -341,7 +345,7 @@ export function ScribeView() {
         </div>
       )}
 
-      {viewingSynthesis && activeLibraryId ? (
+      {viewingSynthesis && activeLibraryId && !isGeneral ? (
         // Synthesis view, keyed by library so switching libraries reloads it.
         <SynthesisView
           key={activeLibraryId}
@@ -349,7 +353,7 @@ export function ScribeView() {
           libraryName={activeName}
           onBack={() => setViewingSynthesis(false)}
         />
-      ) : viewingChat && activeLibraryId ? (
+      ) : viewingChat && activeLibraryId && !isGeneral ? (
         // Grounded chat, keyed by library so switching libraries resets it.
         <ChatView
           key={activeLibraryId}
@@ -361,7 +365,7 @@ export function ScribeView() {
             setSelectedId(id);
           }}
         />
-      ) : viewingGaps && activeLibraryId ? (
+      ) : viewingGaps && activeLibraryId && !isGeneral ? (
         // "What am I missing", keyed by library so switching remounts it.
         <GapsView
           key={activeLibraryId}
@@ -374,9 +378,9 @@ export function ScribeView() {
         />
       ) : (
         <>
-          {/* Synthesis control, scoped to the active library. Keyed by library
-              id so switching libraries remounts it (resets state, stops polls). */}
-          {activeLibraryId && (
+          {/* Synthesis + discovery controls. Hidden for general, which is a
+              plain all-papers view rather than a research library. */}
+          {activeLibraryId && !isGeneral && (
             <SynthesisControl
               key={activeLibraryId}
               libraryId={activeLibraryId}
@@ -386,8 +390,7 @@ export function ScribeView() {
             />
           )}
 
-          {/* Library-level discovery entries, scoped to the active library. */}
-          {activeLibraryId && (
+          {activeLibraryId && !isGeneral && (
             <div className="-mt-2 mb-5 flex flex-wrap gap-x-5 gap-y-1.5">
               <button
                 type="button"

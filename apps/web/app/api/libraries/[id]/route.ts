@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
 import { db, libraries } from "@kazi-lab/db";
+import { isAllPapersLibrary } from "@/lib/library";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -22,7 +23,7 @@ export async function DELETE(
     if (!lib) {
       return NextResponse.json({ error: "Library not found." }, { status: 404 });
     }
-    if (lib.name === "general") {
+    if (isAllPapersLibrary(lib.name)) {
       return NextResponse.json(
         { error: "The 'general' library cannot be deleted." },
         { status: 403 },

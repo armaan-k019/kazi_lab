@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { and, desc, eq, sql } from "drizzle-orm";
 import { claims, db, libraries, paperLibraries, papers } from "@kazi-lab/db";
+import { GENERAL_LIBRARY_NAME } from "@/lib/library";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -11,7 +12,7 @@ async function resolveLibraryId(libraryId: string | null): Promise<string | null
   const [general] = await db
     .select({ id: libraries.id })
     .from(libraries)
-    .where(eq(libraries.name, "general"))
+    .where(eq(libraries.name, GENERAL_LIBRARY_NAME))
     .limit(1);
   return general?.id ?? null;
 }

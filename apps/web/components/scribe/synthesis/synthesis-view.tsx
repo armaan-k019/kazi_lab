@@ -19,6 +19,7 @@ import {
   type PaperEdge,
 } from "@/lib/synthesis-graph";
 import { TimelineGraph } from "./timeline-graph";
+import { isAllPapersLibrary } from "@/lib/library";
 
 export function SynthesisView({
   libraryId,
@@ -89,6 +90,20 @@ export function SynthesisView({
       ← Corpus
     </button>
   );
+
+  // Defense in depth: general is an all-papers view, never synthesized. The UI
+  // does not offer this for general, but guard here in case it is reached.
+  if (isAllPapersLibrary(libraryName)) {
+    return (
+      <div>
+        {back}
+        <p className="max-w-md text-[15px] leading-relaxed text-text-muted">
+          The general library is an all-papers view and is not synthesized.
+          Switch to a research library to see its synthesis.
+        </p>
+      </div>
+    );
+  }
 
   if (error) {
     return (
@@ -198,6 +213,7 @@ export function SynthesisView({
           edges={edges}
           relations={relations}
           openQuestions={openQuestions}
+          themes={themes}
           selected={selected}
           onSelect={setSelected}
         />

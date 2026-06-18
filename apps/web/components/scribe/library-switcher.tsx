@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import type { Library } from "@/lib/types";
+import { isAllPapersLibrary } from "@/lib/library";
 
 type Props = {
   libraries: Library[];
@@ -102,7 +103,7 @@ export function LibrarySwitcher({
         {activeId &&
           (() => {
             const active = libraries.find((l) => l.id === activeId);
-            if (!active || active.name === "general") return null;
+            if (!active || isAllPapersLibrary(active.name)) return null;
             if (confirmDeleteId === active.id) return null;
             return (
               <button
