@@ -4,9 +4,11 @@ import {
   claims,
   claimRelations,
   db,
+  embeddings,
   findings,
   findingPapers,
   openQuestions,
+  paperExternal,
   paperLibraries,
   paperNarrations,
   papers,
@@ -17,6 +19,72 @@ import {
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+// pgvector may arrive as a number[] (drizzle) or a "[1,2,...]" string; coerce.
+function toVector(v: unknown): number[] {
+  if (Array.isArray(v)) return v as number[];
+  if (typeof v === "string") {
+    try {
+      return JSON.parse(v) as number[];
+    } catch {
+      return [];
+    }
+  }
+  return [];
+}
+
+// First principal component of the paper-level embeddings via power iteration
+// (dependency-free), projected to a per-paper 1D coordinate normalized to 0..1.
+// At ~20 papers x 1024 dims this is instant. Papers without an embedding are
+// left out here and default to 0.5 at the call site.
+function computeSemanticY(
+  vectors: { paperId: string; emb: number[] }[],
+): Map<string, number> {
+  const out = new Map<string, number>();
+  const m = vectors.length;
+  if (m === 0) return out;
+  const d = vectors[0].emb.length;
+  if (d === 0) return out;
+
+  const mean = new Array(d).fill(0);
+  for (const { emb } of vectors)
+    for (let j = 0; j < d; j++) mean[j] += emb[j];
+  for (let j = 0; j < d; j++) mean[j] /= m;
+  const X = vectors.map(({ emb }) => emb.map((x, j) => x - mean[j]));
+
+  const normalize = (a: number[]) => {
+    const n = Math.sqrt(a.reduce((s, x) => s + x * x, 0)) || 1;
+    return a.map((x) => x / n);
+  };
+  // Deterministic non-zero seed (no Math.random) so layout is stable per load.
+  let v = normalize(new Array(d).fill(0).map((_, j) => ((j % 7) + 1)));
+  for (let iter = 0; iter < 50; iter++) {
+    const t = X.map((row) => {
+      let s = 0;
+      for (let j = 0; j < d; j++) s += row[j] * v[j];
+      return s;
+    });
+    const w = new Array(d).fill(0);
+    for (let i = 0; i < m; i++) {
+      const ti = t[i];
+      const row = X[i];
+      for (let j = 0; j < d; j++) w[j] += row[j] * ti;
+    }
+    v = normalize(w);
+  }
+  const scores = X.map((row) => {
+    let s = 0;
+    for (let j = 0; j < d; j++) s += row[j] * v[j];
+    return s;
+  });
+  const lo = Math.min(...scores);
+  const hi = Math.max(...scores);
+  const range = hi - lo;
+  vectors.forEach(({ paperId }, i) => {
+    out.set(paperId, range > 1e-9 ? (scores[i] - lo) / range : 0.5);
+  });
+  return out;
+}
 
 // Full latest-completed-synthesis payload for a library, with all joins
 // resolved so the client gets display-ready data. Returns { run: null } when
@@ -93,10 +161,49 @@ export async function GET(request: Request) {
       narrationRows.map((n) => [n.paperId, n.narration]),
     );
 
+    // Influence: cited_by_count from the matched OpenAlex record (null if
+    // unmatched). Feeds node size and the "influence" Y axis.
+    const citedRows = paperIds.length
+      ? await db
+          .select({
+            paperId: paperExternal.paperId,
+            citedByCount: paperExternal.citedByCount,
+          })
+          .from(paperExternal)
+          .where(
+            and(
+              eq(paperExternal.source, "openalex"),
+              eq(paperExternal.matchStatus, "matched"),
+              inArray(paperExternal.paperId, paperIds),
+            ),
+          )
+      : [];
+    const citedByPaper = new Map(
+      citedRows.map((c) => [c.paperId, c.citedByCount]),
+    );
+
+    // Semantic axis: PCA first component of the paper-level embeddings.
+    const embRows = paperIds.length
+      ? await db
+          .select({ paperId: embeddings.paperId, embedding: embeddings.embedding })
+          .from(embeddings)
+          .where(
+            and(
+              eq(embeddings.entityType, "paper"),
+              inArray(embeddings.paperId, paperIds),
+            ),
+          )
+      : [];
+    const semanticByPaper = computeSemanticY(
+      embRows.map((e) => ({ paperId: e.paperId, emb: toVector(e.embedding) })),
+    );
+
     const paperRows = paperBase.map((p) => ({
       ...p,
       claims: claimsByPaper.get(p.id) ?? [],
       narration: narrationByPaper.get(p.id) ?? null,
+      citedByCount: citedByPaper.get(p.id) ?? null,
+      semanticY: semanticByPaper.get(p.id) ?? 0.5,
     }));
 
     // Themes + their papers.

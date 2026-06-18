@@ -149,6 +149,8 @@ export type SynthesisPaper = {
   claimCount: number;
   claims: { id: string; text: string }[];
   narration: string | null;
+  citedByCount: number | null; // from matched OpenAlex record, null if unmatched
+  semanticY: number; // PCA first-component coordinate, 0..1 (0.5 if no embedding)
 };
 
 export type SynthesisTheme = {
