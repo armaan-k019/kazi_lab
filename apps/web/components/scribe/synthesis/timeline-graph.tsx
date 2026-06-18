@@ -29,12 +29,47 @@ const PAD_L = 70;
 const UNDATED_X = W - 70;
 const DATED_X_MAX = W - 170; // leave a band on the right for the undated lane
 
-// Zoom thresholds (k = scale). FAR: structure only. MID: default. CLOSE:
-// papers expand into claim sub-nodes.
+// ---- tuning constants (centralized for a cheap fine-tuning pass) ----------
+// Zoom thresholds (k = scale). FAR: structure only. MID: default labels.
+// CLOSE: papers expand into claim sub-nodes.
 const MID_MIN = 0.75;
 const CLOSE_MIN = 1.8;
 
+// Force layout. Charge (repulsion) and collision padding scale mildly with the
+// node count so ~20 nodes spread with breathing room without flying apart. The
+// timeline forceX (date positioning) is intentionally left untouched; only the
+// vertical/repulsion spacing is loosened.
+const CHARGE_BASE = -260;
+const CHARGE_PER_NODE = -16;
+const CHARGE_MIN = -1200; // clamp (most negative) so the layout stays bounded
+const COLLIDE_BASE = 22;
+const COLLIDE_PER_NODE = 0.7;
+const COLLIDE_MAX = 48;
+const Y_CENTER_STRENGTH = 0.06;
+
+// Claim expansion at CLOSE is viewport-culled: only papers within this many
+// world units of the visible viewport expand into claim sub-nodes. Bounds both
+// clutter and DOM/perf cost at ~20 papers (~120 claims).
+const CLAIM_VIEWPORT_MARGIN = 90;
+
+// Label decluttering. At MID many labels overlap, so we greedily skip a label
+// that would intersect an already-placed one (larger / more-connected nodes
+// win). Hovered or selected nodes always show a full, untruncated label.
+const LABEL_VIEWPORT_MARGIN = 40;
+const LABEL_CHAR_W = 5.6; // approx world-unit width per char at fontSize 10
+const LABEL_LINE_H = 13;
+const LABEL_PAD = 3;
+const LABEL_TRUNC_MID = 20;
+const LABEL_TRUNC_CLOSE = 30;
+
+// Open questions: nodes shown by default, but their dashed edges are drawn only
+// for the hovered or selected question (avoids an edge hairball at ~20 nodes).
+// A toggle hides the question nodes entirely for a pure paper-relation graph.
+const SHOW_QUESTIONS_DEFAULT = true;
+
 type Level = "far" | "mid" | "close";
+
+type Bounds = { minX: number; maxX: number; minY: number; maxY: number };
 
 type GNode = SimulationNodeDatum & {
   kind: "paper" | "question";
@@ -58,6 +93,30 @@ function endpointId(e: string | GNode): string {
   return typeof e === "string" ? e : e.id;
 }
 
+// Visible region in world coordinates, derived from the live d3-zoom transform
+// (screen point s maps to world (s - translate) / scale), expanded by a margin.
+function viewportBounds(
+  t: { k: number; x: number; y: number },
+  margin: number,
+): Bounds {
+  return {
+    minX: (0 - t.x) / t.k - margin,
+    maxX: (W - t.x) / t.k + margin,
+    minY: (0 - t.y) / t.k - margin,
+    maxY: (H - t.y) / t.k + margin,
+  };
+}
+function inBounds(n: GNode, b: Bounds): boolean {
+  return (
+    n.x != null &&
+    n.y != null &&
+    n.x >= b.minX &&
+    n.x <= b.maxX &&
+    n.y >= b.minY &&
+    n.y <= b.maxY
+  );
+}
+
 export function TimelineGraph({
   papers,
   edges,
@@ -79,6 +138,8 @@ export function TimelineGraph({
   const zoomRef = useRef<ZoomBehavior<SVGSVGElement, unknown> | null>(null);
   const [, rerender] = useState(0);
   const [transform, setTransform] = useState({ k: 1, x: 0, y: 0 });
+  const [showQuestions, setShowQuestions] = useState(SHOW_QUESTIONS_DEFAULT);
+  const [hovered, setHovered] = useState<string | null>(null);
 
   const level: Level =
     transform.k >= CLOSE_MIN ? "close" : transform.k >= MID_MIN ? "mid" : "far";
@@ -116,8 +177,7 @@ export function TimelineGraph({
     const paperX = new Map<string, number>();
     const paperNodes: GNode[] = papers.map((p) => {
       const ms = p.publishedAt ? new Date(p.publishedAt).getTime() : NaN;
-      const tx =
-        time && !Number.isNaN(ms) ? time.toX(ms) : UNDATED_X;
+      const tx = time && !Number.isNaN(ms) ? time.toX(ms) : UNDATED_X;
       paperX.set(p.id, tx);
       return {
         kind: "paper",
@@ -170,6 +230,15 @@ export function TimelineGraph({
       "(prefers-reduced-motion: reduce)",
     ).matches;
 
+    // Scale repulsion and collision padding mildly with node count so larger
+    // libraries (~20 nodes) get more breathing room.
+    const nodeCount = built.nodes.length;
+    const charge = Math.max(CHARGE_MIN, CHARGE_BASE + CHARGE_PER_NODE * nodeCount);
+    const collidePad = Math.min(
+      COLLIDE_MAX,
+      COLLIDE_BASE + COLLIDE_PER_NODE * nodeCount,
+    );
+
     const sim = forceSimulation(built.nodes)
       .force(
         "link",
@@ -178,13 +247,15 @@ export function TimelineGraph({
           .distance((l) => (l.oq ? 70 : 110))
           .strength((l) => (l.oq ? 0.08 : 0.12)),
       )
-      .force("charge", forceManyBody().strength(-300))
-      .force("collide", forceCollide<GNode>().radius((d) => d.r + 24))
+      .force("charge", forceManyBody().strength(charge))
+      // Collision includes open-question nodes (they are sim nodes), so they do
+      // not overlap paper nodes at higher counts.
+      .force("collide", forceCollide<GNode>().radius((d) => d.r + collidePad))
       .force(
         "x",
         forceX<GNode>((d) => d.targetX).strength((d) => d.xStrength),
       )
-      .force("y", forceY(H / 2).strength(0.06));
+      .force("y", forceY(H / 2).strength(Y_CENTER_STRENGTH));
 
     if (reduce) {
       sim.stop();
@@ -228,14 +299,16 @@ export function TimelineGraph({
     return m;
   }, [built, transform]);
 
-  // Claim sub-node positions (deterministic ring around each settled paper),
-  // built only at CLOSE zoom for perf + clarity.
+  // Claim sub-node positions (deterministic ring around each settled paper).
+  // Built only at CLOSE zoom AND only for papers within the visible viewport,
+  // so the rendered claim count is bounded by what is actually on screen.
   const claimPos = useMemo(() => {
-    if (level !== "close") return new Map<string, { x: number; y: number }>();
     const m = new Map<string, { x: number; y: number }>();
+    if (level !== "close") return m;
+    const vb = viewportBounds(transform, CLAIM_VIEWPORT_MARGIN);
     for (const p of papers) {
       const node = nodeById.get(p.id);
-      if (!node || node.x == null || node.y == null) continue;
+      if (!node || !inBounds(node, vb)) continue;
       const n = p.claims.length;
       const ringR = node.r + 30;
       p.claims.forEach((c, i) => {
@@ -247,7 +320,7 @@ export function TimelineGraph({
       });
     }
     return m;
-  }, [level, papers, nodeById]);
+  }, [level, papers, nodeById, transform]);
 
   const focusedPaper =
     selected?.kind === "paper"
@@ -256,8 +329,71 @@ export function TimelineGraph({
         ? selected.paperId
         : null;
 
+  // The open question whose edges should be drawn: hovered question wins, else
+  // the selected question. Its related papers get a subtle highlight.
+  const activeOq =
+    hovered && nodeById.get(hovered)?.kind === "question"
+      ? hovered
+      : selected?.kind === "question"
+        ? selected.id
+        : null;
+  const oqRelated =
+    activeOq != null
+      ? new Set(nodeById.get(activeOq)?.relatedPaperIds ?? [])
+      : null;
+
+  // Greedy label collision avoidance, recomputed each render so it tracks live
+  // sim positions. Candidates are in-viewport paper nodes (so zooming into a
+  // region reveals more labels); hovered/selected are always labeled.
+  const labeledPapers = (() => {
+    const set = new Set<string>();
+    if (level === "far") return set;
+    const vb = viewportBounds(transform, LABEL_VIEWPORT_MARGIN);
+    const trunc = level === "close" ? LABEL_TRUNC_CLOSE : LABEL_TRUNC_MID;
+    type Box = { x0: number; y0: number; x1: number; y1: number };
+    const placed: Box[] = [];
+    const boxFor = (n: GNode): Box => {
+      const w = Math.min(n.label.length, trunc) * LABEL_CHAR_W + LABEL_PAD * 2;
+      const cx = n.x!;
+      const top = n.y! + n.r + 4;
+      return { x0: cx - w / 2, y0: top - LABEL_PAD, x1: cx + w / 2, y1: top + LABEL_LINE_H };
+    };
+    const overlaps = (a: Box, b: Box) =>
+      a.x0 < b.x1 && a.x1 > b.x0 && a.y0 < b.y1 && a.y1 > b.y0;
+
+    const papersOnly = nodesRef.current.filter(
+      (n) => n.kind === "paper" && n.x != null && n.y != null,
+    );
+    const forced = new Set<string>();
+    if (focusedPaper) forced.add(focusedPaper);
+    if (hovered && nodeById.get(hovered)?.kind === "paper") forced.add(hovered);
+
+    // Forced labels first (always placed), then in-viewport nodes by radius.
+    const ordered = [
+      ...papersOnly.filter((n) => forced.has(n.id)),
+      ...papersOnly
+        .filter((n) => !forced.has(n.id) && inBounds(n, vb))
+        .sort((a, b) => b.r - a.r),
+    ];
+    for (const n of ordered) {
+      const box = boxFor(n);
+      if (forced.has(n.id) || !placed.some((p) => overlaps(p, box))) {
+        set.add(n.id);
+        placed.push(box);
+      }
+    }
+    return set;
+  })();
+
   return (
     <div className="relative">
+      <button
+        type="button"
+        onClick={() => setShowQuestions((v) => !v)}
+        className="absolute left-2 top-2 z-10 rounded-md border border-border bg-surface px-2.5 py-1 text-[12px] text-text-secondary transition-colors hover:border-accent/40 hover:text-accent"
+      >
+        {showQuestions ? "open questions: on" : "open questions: off"}
+      </button>
       <button
         type="button"
         onClick={resetView}
@@ -326,30 +462,32 @@ export function TimelineGraph({
             })}
           </g>
 
-          {/* open-question dashed edges */}
-          <g style={{ opacity: level === "far" ? 0.25 : 0.5 }}>
-            {linksRef.current
-              .filter((l) => l.oq)
-              .map((l, i) => {
-                const a = nodeById.get(endpointId(l.source));
-                const b = nodeById.get(endpointId(l.target));
-                if (!a || !b || a.x == null || b.x == null) return null;
-                return (
-                  <line
-                    key={`oq-${i}`}
-                    x1={a.x}
-                    y1={a.y!}
-                    x2={b.x}
-                    y2={b.y!}
-                    stroke="var(--text-muted)"
-                    strokeWidth={1 / Math.max(1, transform.k)}
-                    strokeDasharray="3 3"
-                  />
-                );
-              })}
-          </g>
+          {/* open-question dashed edges: only for the hovered/selected question */}
+          {showQuestions && activeOq && (
+            <g style={{ opacity: 0.6 }}>
+              {linksRef.current
+                .filter((l) => l.oq && endpointId(l.source) === activeOq)
+                .map((l, i) => {
+                  const a = nodeById.get(endpointId(l.source));
+                  const b = nodeById.get(endpointId(l.target));
+                  if (!a || !b || a.x == null || b.x == null) return null;
+                  return (
+                    <line
+                      key={`oq-${i}`}
+                      x1={a.x}
+                      y1={a.y!}
+                      x2={b.x}
+                      y2={b.y!}
+                      stroke="var(--text-muted)"
+                      strokeWidth={1 / Math.max(1, transform.k)}
+                      strokeDasharray="3 3"
+                    />
+                  );
+                })}
+            </g>
+          )}
 
-          {/* claim-level edges + sub-nodes (CLOSE only) */}
+          {/* claim-level edges + sub-nodes (CLOSE only, viewport-culled) */}
           {level === "close" && (
             <g style={{ transition: "opacity 200ms ease" }}>
               {relations.map((r) => {
@@ -405,44 +543,45 @@ export function TimelineGraph({
           {/* nodes: papers + open questions */}
           {nodesRef.current.map((n) => {
             if (n.x == null || n.y == null) return null;
-            const dim =
-              focusedPaper != null &&
-              n.kind === "paper" &&
-              n.id !== focusedPaper;
-            const showLabel = level !== "far";
 
             if (n.kind === "question") {
+              if (!showQuestions) return null;
               const isSel =
                 selected?.kind === "question" && selected.id === n.id;
+              const isActive = activeOq === n.id;
+              const showOqLabel = isActive || level === "close";
               return (
                 <g
                   key={n.id}
                   transform={`translate(${n.x},${n.y})`}
                   className="cursor-pointer"
                   opacity={level === "far" ? 0.5 : 1}
+                  onMouseEnter={() => setHovered(n.id)}
+                  onMouseLeave={() =>
+                    setHovered((h) => (h === n.id ? null : h))
+                  }
                   onClick={(e) => {
                     e.stopPropagation();
-                    onSelect(
-                      isSel ? null : { kind: "question", id: n.id },
-                    );
+                    onSelect(isSel ? null : { kind: "question", id: n.id });
                   }}
                 >
                   <circle
                     r={n.r}
                     fill="none"
-                    stroke={isSel ? "var(--accent)" : "var(--text-muted)"}
+                    stroke={
+                      isSel || isActive ? "var(--accent)" : "var(--text-muted)"
+                    }
                     strokeWidth={1.5}
                     strokeDasharray="3 2.5"
                   />
-                  {level !== "far" && (
+                  {showOqLabel && (
                     <text
                       y={n.r + 11}
                       textAnchor="middle"
                       fontSize={9}
                       fill="var(--text-muted)"
                     >
-                      ?{" "}
-                      {truncate(n.label, level === "close" ? 28 : 18)}
+                      ? {truncate(n.label, level === "close" ? 28 : 18)}
                     </text>
                   )}
                 </g>
@@ -450,12 +589,25 @@ export function TimelineGraph({
             }
 
             const isSel = n.id === focusedPaper;
+            const isHovered = hovered === n.id;
+            const dim = focusedPaper != null && !isSel;
+            const oqLinked = oqRelated?.has(n.id) ?? false;
+            const showThisLabel = labeledPapers.has(n.id);
+            const labelText =
+              isSel || isHovered
+                ? n.label
+                : truncate(
+                    n.label,
+                    level === "close" ? LABEL_TRUNC_CLOSE : LABEL_TRUNC_MID,
+                  );
             return (
               <g
                 key={n.id}
                 transform={`translate(${n.x},${n.y})`}
                 className="cursor-pointer"
-                opacity={dim ? 0.3 : 1}
+                opacity={dim && !oqLinked ? 0.3 : 1}
+                onMouseEnter={() => setHovered(n.id)}
+                onMouseLeave={() => setHovered((h) => (h === n.id ? null : h))}
                 onClick={(e) => {
                   e.stopPropagation();
                   onSelect(isSel ? null : { kind: "paper", id: n.id });
@@ -464,17 +616,21 @@ export function TimelineGraph({
                 <circle
                   r={level === "far" ? Math.max(5, n.r - 3) : n.r}
                   fill={isSel ? "var(--accent-dim)" : "var(--surface)"}
-                  stroke={isSel ? "var(--accent)" : "var(--border-strong)"}
-                  strokeWidth={isSel ? 2 : 1.5}
+                  stroke={
+                    isSel || oqLinked
+                      ? "var(--accent)"
+                      : "var(--border-strong)"
+                  }
+                  strokeWidth={isSel || oqLinked ? 2 : 1.5}
                 />
-                {showLabel && (
+                {showThisLabel && (
                   <text
                     y={n.r + 12}
                     textAnchor="middle"
                     fontSize={10}
                     fill={isSel ? "var(--accent)" : "var(--text-secondary)"}
                   >
-                    {truncate(n.label, level === "close" ? 30 : 20)}
+                    {labelText}
                   </text>
                 )}
               </g>
