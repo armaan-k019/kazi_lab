@@ -148,19 +148,6 @@ export function ScribeView() {
     setIngestError(null);
   };
 
-  const handleCreateLibrary = async (name: string, description: string) => {
-    const res = await fetch("/api/libraries", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, description: description || undefined }),
-    });
-    const body = await res.json();
-    if (!res.ok) throw new Error(body.error ?? "Could not create the library.");
-    const libs = await fetchLibraries();
-    setLibraries(libs);
-    setActiveLibraryId(body.library.id); // switch to the new library
-  };
-
   const handleDeleteLibrary = async (id: string) => {
     const res = await fetch(`/api/libraries/${id}`, { method: "DELETE" });
     const body = await res.json().catch(() => ({}));
@@ -339,7 +326,9 @@ export function ScribeView() {
             libraries={libraries}
             activeId={activeLibraryId}
             onSelect={handleSelectLibrary}
-            onCreate={handleCreateLibrary}
+            onChanged={() => {
+              if (activeLibraryId) void refresh(activeLibraryId);
+            }}
             onDelete={handleDeleteLibrary}
           />
         </div>

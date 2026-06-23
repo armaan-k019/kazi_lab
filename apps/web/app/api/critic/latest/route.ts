@@ -4,6 +4,7 @@ import {
   claims,
   claimRelations,
   contradictionVerdicts,
+  criticAbstracts,
   criticRuns,
   db,
   findings,
@@ -78,6 +79,20 @@ export async function GET(request: Request) {
         findings: [],
       });
     }
+
+    // The run's direction-setting abstract (one per run, may be absent).
+    const [abstract] = await db
+      .select({
+        title: criticAbstracts.title,
+        abstractText: criticAbstracts.abstractText,
+        claimToTest: criticAbstracts.claimToTest,
+        direction: criticAbstracts.direction,
+        groundedOn: criticAbstracts.groundedOn,
+        conferencesConsidered: criticAbstracts.conferencesConsidered,
+      })
+      .from(criticAbstracts)
+      .where(eq(criticAbstracts.criticRunId, run.id))
+      .limit(1);
 
     // Contradiction verdicts, resolved to claim texts + papers + synthesis note.
     const cvRows = await db
@@ -198,6 +213,7 @@ export async function GET(request: Request) {
         completedAt: run.completedAt,
         notes: run.notes,
       },
+      abstract: abstract ?? null,
       contradictions,
       findings: findingsOut,
     });

@@ -163,6 +163,27 @@ export type CriticFinding = {
   confidence: string | null;
   severity: string | null;
 };
+export type LibraryConference = {
+  id: string;
+  name: string;
+  sourceUrl: string | null;
+  sourceKind: string;
+  rawSourceText: string | null;
+  themes: string[] | null;
+  keyDates: string[] | null;
+  scopeSummary: string | null;
+  synthStatus: string;
+  notes: string | null;
+};
+
+export type CriticAbstract = {
+  title: string | null;
+  abstractText: string | null;
+  claimToTest: string | null;
+  direction: string | null;
+  groundedOn: string[] | null;
+  conferencesConsidered: string[] | null;
+};
 export type CriticLatest =
   | { general: true }
   | {
@@ -174,6 +195,7 @@ export type CriticLatest =
         completedAt: string | null;
         notes: string | null;
       } | null;
+      abstract: CriticAbstract | null;
       contradictions: CriticContradiction[];
       findings: CriticFinding[];
     };

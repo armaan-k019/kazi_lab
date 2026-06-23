@@ -120,7 +120,38 @@ export const libraries = pgTable("libraries", {
   id: uuid("id").primaryKey().defaultRandom(),
   name: text("name").notNull(),
   description: text("description"),
+  // Richer research context (all optional; a library with none set behaves
+  // exactly as before). userNotes is a private scratchpad and is NEVER sent to
+  // any model call.
+  researchFocus: text("research_focus"),
+  hypothesis: text("hypothesis"),
+  userNotes: text("user_notes"),
+  targetVenueType: text("target_venue_type"), // workshop | full paper | journal | poster | other
+  status: text("status"), // exploring | drafting | proposed
   createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+// Conferences a library targets. Each may carry an optional source (a CFP link,
+// pasted PDF text, or pasted text) that is synthesized into themes/scope/dates.
+// HARD BOUNDARY: conference sources are context only. They are NEVER inserted
+// into papers/extractions/claims/embeddings and never enter Scribe synthesis.
+export const libraryConferences = pgTable("library_conferences", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  libraryId: uuid("library_id")
+    .notNull()
+    .references(() => libraries.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  sourceUrl: text("source_url"),
+  sourceKind: text("source_kind").notNull().default("none"), // url | pdf | text | none
+  rawSourceText: text("raw_source_text"),
+  themes: text("themes").array().default(sql`'{}'::text[]`),
+  keyDates: text("key_dates").array().default(sql`'{}'::text[]`),
+  scopeSummary: text("scope_summary"),
+  synthStatus: text("synth_status").notNull().default("none"), // none | synthesized | failed
+  notes: text("notes"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
 export const paperLibraries = pgTable(
@@ -428,8 +459,31 @@ export const findingVerdicts = pgTable("finding_verdicts", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
+// The Critic's direction-setting abstract for a run: a grounded research
+// direction bound to the library hypothesis and steered by conference themes,
+// built only on audited-sound findings. One per critic run.
+export const criticAbstracts = pgTable("critic_abstracts", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  criticRunId: uuid("critic_run_id")
+    .notNull()
+    .references(() => criticRuns.id, { onDelete: "cascade" }),
+  title: text("title"),
+  abstractText: text("abstract_text"),
+  claimToTest: text("claim_to_test"),
+  direction: text("direction"),
+  groundedOn: text("grounded_on").array().default(sql`'{}'::text[]`), // finding/relation ids
+  conferencesConsidered: text("conferences_considered")
+    .array()
+    .default(sql`'{}'::text[]`),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
 export type CriticRun = typeof criticRuns.$inferSelect;
 export type NewCriticRun = typeof criticRuns.$inferInsert;
+export type LibraryConference = typeof libraryConferences.$inferSelect;
+export type NewLibraryConference = typeof libraryConferences.$inferInsert;
+export type CriticAbstract = typeof criticAbstracts.$inferSelect;
+export type NewCriticAbstract = typeof criticAbstracts.$inferInsert;
 export type ContradictionVerdict = typeof contradictionVerdicts.$inferSelect;
 export type NewContradictionVerdict =
   typeof contradictionVerdicts.$inferInsert;

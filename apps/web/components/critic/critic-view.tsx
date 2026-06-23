@@ -205,6 +205,53 @@ function CritiqueBody({
         </p>
       )}
 
+      {data.run && data.abstract && (
+        <section className="mt-8 rounded-xl border border-accent/30 bg-accent-dim/40 p-5">
+          <p className="text-[11px] font-medium uppercase tracking-wide text-accent">
+            Direction-setting abstract
+          </p>
+          {data.abstract.title && (
+            <h3 className="mt-1.5 text-lg font-semibold tracking-tight text-text-primary">
+              {data.abstract.title}
+            </h3>
+          )}
+          {data.abstract.abstractText && (
+            <p className="mt-2 text-[15px] leading-relaxed text-text-primary">
+              {data.abstract.abstractText}
+            </p>
+          )}
+          {data.abstract.claimToTest && (
+            <p className="mt-3 text-[14px] text-text-secondary">
+              <span className="font-medium text-text-primary">Claim to test:</span>{" "}
+              {data.abstract.claimToTest}
+            </p>
+          )}
+          {data.abstract.direction && (
+            <p className="mt-1.5 text-[14px] text-text-secondary">
+              <span className="font-medium text-text-primary">Direction:</span>{" "}
+              {data.abstract.direction}
+            </p>
+          )}
+          <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-[12px] text-text-muted">
+            <span>
+              grounded on {data.abstract.groundedOn?.length ?? 0} audited-sound
+              item(s)
+            </span>
+            {data.abstract.conferencesConsidered &&
+              data.abstract.conferencesConsidered.length > 0 && (
+                <span>
+                  steered by: {data.abstract.conferencesConsidered.join(", ")}
+                </span>
+              )}
+          </div>
+        </section>
+      )}
+      {data.run && !data.abstract && (
+        <p className="mt-6 text-[13px] text-text-muted">
+          No abstract generated for this run.
+        </p>
+      )}
+
       {data.run && (
         <>
           {/* Triage: what to look at */}

@@ -4,12 +4,14 @@ import {
   claims,
   claimRelations,
   contradictionVerdicts,
+  criticAbstracts,
   criticRuns,
   db,
   findings,
   findingPapers,
   findingVerdicts,
   libraries,
+  libraryConferences,
   paperLibraries,
   papers,
   synthesisRuns,
@@ -30,6 +32,36 @@ const MAX_OUTPUT_CAP = 32_000;
 function critiqueMaxTokens(itemCount: number): number {
   return Math.min(BASE_TOKENS + itemCount * TOKENS_PER_ITEM, MAX_OUTPUT_CAP);
 }
+
+// The direction-setting abstract is a second, smaller Opus call after the
+// audit. Keeping it separate keeps each JSON contract clean and each truncation
+// guard reliable (bundling it would bloat the audit JSON).
+const ABSTRACT_MAX_TOKENS = 2_500;
+
+// BOUNDARY: the abstract stops at research direction, the claim to test, and a
+// high-level conceptual approach. It must NOT specify executable experimental
+// protocols, datasets, or methods-level procedures. The Experimentalist (the
+// next agent, out of scope here) turns this direction into an executable design.
+const ABSTRACT_SYSTEM_PROMPT = `You are the Critic writing a DIRECTION-SETTING ABSTRACT for a research library, to give later agents a grounded direction. You are given the library's hypothesis (if any), its research focus (if any), the target conference themes and scope (if any), and ONLY the findings and contradictions that survived your audit as SOUND.
+
+Write a short abstract that sets a research direction. Rules:
+- If a hypothesis is given, orient the direction around investigating or testing it. If none is given, propose the strongest real direction from the audited-sound findings (the most promising open question or gap).
+- If conference themes/scope are given, steer the framing and what counts as a contribution toward those venues. If none, stay venue-neutral.
+- Build ONLY on the sound findings and contradictions provided. Do NOT introduce claims they do not support. Record the ids you rely on in grounded_on.
+- STOP at the research direction, the specific claim to test, and a high-level conceptual approach. Do NOT specify executable experimental protocols, datasets, hyperparameters, or step-by-step methods. A later Experimentalist agent will turn this into an executable design.
+
+Return ONLY valid JSON (no markdown, no commentary) matching:
+{ "title": "working title", "abstract_text": "1-2 paragraphs of direction-setting abstract", "claim_to_test": "the specific claim the proposed research would investigate", "direction": "the high-level conceptual approach", "grounded_on": ["id", ...], "conferences_considered": ["conference name", ...] }
+Use only the finding and contradiction ids provided in grounded_on.`;
+
+type RawAbstract = {
+  title?: unknown;
+  abstract_text?: unknown;
+  claim_to_test?: unknown;
+  direction?: unknown;
+  grounded_on?: unknown;
+  conferences_considered?: unknown;
+};
 
 const CONTRADICTION_VERDICTS = [
   "genuine",
@@ -100,6 +132,7 @@ export type CritiqueResult =
       criticRunId: string;
       contradictionsAudited: number;
       findingsAudited: number;
+      abstractGenerated: boolean;
     }
   | { status: "failed"; criticRunId: string; error: string };
 
@@ -117,11 +150,109 @@ function oneOf<T extends readonly string[]>(
     : null;
 }
 
+// Generate and store the direction-setting abstract. Grounds ONLY on the
+// audited-sound items passed in; grounded_on ids are validated against them, so
+// the abstract cannot rest on findings the audit flagged. Returns false (no
+// insert) when there is nothing audited-sound to ground on. Throws on a model
+// or parse failure so the caller can record a non-fatal note.
+async function generateAbstract(args: {
+  criticRunId: string;
+  library: { name: string; hypothesis: string | null; researchFocus: string | null };
+  conferences: { name: string; themes: string[] | null; scopeSummary: string | null }[];
+  soundFindings: { id: string; statement: string }[];
+  genuineContradictions: { id: string; fromText: string; toText: string }[];
+}): Promise<boolean> {
+  const allowed = new Set<string>([
+    ...args.soundFindings.map((f) => f.id),
+    ...args.genuineContradictions.map((c) => c.id),
+  ]);
+  if (allowed.size === 0) return false;
+
+  const confDoc = args.conferences.length
+    ? args.conferences
+        .map(
+          (c) =>
+            `- ${c.name}: themes [${(c.themes ?? []).join(", ")}]` +
+            (c.scopeSummary ? `; scope: ${c.scopeSummary}` : ""),
+        )
+        .join("\n")
+    : "(none provided; write venue-neutral)";
+  const findingDoc = args.soundFindings.length
+    ? args.soundFindings.map((f) => `FINDING ${f.id}: ${f.statement}`).join("\n")
+    : "(none)";
+  const contraDoc = args.genuineContradictions.length
+    ? args.genuineContradictions
+        .map((c) => `CONTRADICTION ${c.id}: "${c.fromText}" vs "${c.toText}"`)
+        .join("\n")
+    : "(none)";
+
+  const userMessage = `Library: ${args.library.name}
+Hypothesis: ${args.library.hypothesis ?? "(none set; propose the strongest direction from the sound findings)"}
+Research focus: ${args.library.researchFocus ?? "(none)"}
+
+Target conferences:
+${confDoc}
+
+Audited-sound findings (build only on these):
+${findingDoc}
+
+Genuine contradictions (audited as real):
+${contraDoc}`;
+
+  const client = new Anthropic();
+  const response = await client.messages
+    .stream({
+      model: MODEL,
+      max_tokens: ABSTRACT_MAX_TOKENS,
+      system: ABSTRACT_SYSTEM_PROMPT,
+      messages: [{ role: "user", content: userMessage }],
+    })
+    .finalMessage();
+  const truncated = response.stop_reason === "max_tokens";
+  const block = response.content.find((b) => b.type === "text");
+  const raw = block && block.type === "text" ? block.text : "";
+  let parsed: RawAbstract;
+  try {
+    parsed = JSON.parse(stripJsonFence(raw)) as RawAbstract;
+  } catch (e) {
+    throw new Error(
+      truncated
+        ? "Abstract output truncated; incomplete JSON."
+        : `Failed to parse abstract JSON: ${(e as Error).message}`,
+    );
+  }
+  const str = (v: unknown) =>
+    typeof v === "string" && v.trim().length > 0 ? v.trim() : null;
+  // id-validation guard: grounded_on must reference audited-sound ids only.
+  const groundedOn = Array.isArray(parsed.grounded_on)
+    ? parsed.grounded_on.filter((x): x is string => typeof x === "string" && allowed.has(x))
+    : [];
+  const conferencesConsidered = Array.isArray(parsed.conferences_considered)
+    ? parsed.conferences_considered.filter((x): x is string => typeof x === "string")
+    : [];
+
+  await db.insert(criticAbstracts).values({
+    criticRunId: args.criticRunId,
+    title: str(parsed.title),
+    abstractText: str(parsed.abstract_text),
+    claimToTest: str(parsed.claim_to_test),
+    direction: str(parsed.direction),
+    groundedOn,
+    conferencesConsidered,
+  });
+  return true;
+}
+
 // Audit the latest completed synthesis run for a library. Returns "nothing"
 // (without creating a run) if there is no synthesis to critique.
 export async function runCritique(libraryId: string): Promise<CritiqueResult> {
   const [library] = await db
-    .select({ id: libraries.id, name: libraries.name })
+    .select({
+      id: libraries.id,
+      name: libraries.name,
+      hypothesis: libraries.hypothesis,
+      researchFocus: libraries.researchFocus,
+    })
     .from(libraries)
     .where(eq(libraries.id, libraryId))
     .limit(1);
@@ -399,11 +530,73 @@ ${findingDoc || "(none)"}`;
         .where(eq(criticRuns.id, criticRunId));
     });
 
+    // Direction-setting abstract (non-fatal, mirrors synthesis narration): the
+    // audit is already stored, so an abstract failure only records a note.
+    let abstractGenerated = false;
+    try {
+      const soundFindings = findingValues
+        .filter((v) => v.labelVerdict === "justified" && v.groundingVerdict === "grounded")
+        .map((v) => ({
+          id: v.findingId,
+          statement: findingRows.find((f) => f.id === v.findingId)?.statement ?? "",
+        }));
+      const genuineContradictions = contraValues
+        .filter((v) => v.verdict === "genuine")
+        .map((v) => {
+          const rel = contradictionRels.find((r) => r.id === v.claimRelationId);
+          return {
+            id: v.claimRelationId,
+            fromText: rel ? (claimById.get(rel.fromClaimId)?.text ?? "") : "",
+            toText: rel ? (claimById.get(rel.toClaimId)?.text ?? "") : "",
+          };
+        });
+      const confRows = await db
+        .select({
+          name: libraryConferences.name,
+          themes: libraryConferences.themes,
+          scopeSummary: libraryConferences.scopeSummary,
+        })
+        .from(libraryConferences)
+        .where(
+          and(
+            eq(libraryConferences.libraryId, libraryId),
+            eq(libraryConferences.synthStatus, "synthesized"),
+          ),
+        );
+      abstractGenerated = await generateAbstract({
+        criticRunId,
+        library: {
+          name: library.name,
+          hypothesis: library.hypothesis,
+          researchFocus: library.researchFocus,
+        },
+        conferences: confRows,
+        soundFindings,
+        genuineContradictions,
+      });
+      if (!abstractGenerated) {
+        const merged = [...noteParts, "No audited-sound findings to ground an abstract."];
+        await db
+          .update(criticRuns)
+          .set({ notes: merged.join(" ") })
+          .where(eq(criticRuns.id, criticRunId));
+      }
+    } catch (absErr) {
+      const msg = absErr instanceof Error ? absErr.message : String(absErr);
+      console.error("Abstract step failed (audit still stored):", msg);
+      const merged = [...noteParts, `Abstract could not be generated: ${msg.slice(0, 160)}`];
+      await db
+        .update(criticRuns)
+        .set({ notes: merged.join(" ") })
+        .where(eq(criticRuns.id, criticRunId));
+    }
+
     return {
       status: "completed",
       criticRunId,
       contradictionsAudited: contraValues.length,
       findingsAudited: findingValues.length,
+      abstractGenerated,
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
