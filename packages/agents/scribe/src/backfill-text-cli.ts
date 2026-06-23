@@ -18,12 +18,14 @@ async function main(): Promise<void> {
   // Re-process only papers that did not get full text yet (parse_path null or
   // abstract_only), e.g. to retry ones skipped by a transient error.
   const onlyMissing = process.env.ONLY_MISSING === "1";
+  // Bounded sample for cheap verification before a full pass (e.g. LIMIT=3).
+  const limit = Number(process.env.LIMIT) || 0;
   const { eq, or, isNull } = await import("drizzle-orm");
   const { db, papers, paperLibraries, libraries } = await import("@kazi-lab/db");
   const { fetchSource } = await import("./fetch-source");
   const { sanitizeText } = await import("./markdown");
 
-  const all = await db
+  const selected = await db
     .select({ id: papers.id, arxivId: papers.arxivId, url: papers.url, title: papers.title })
     .from(papers)
     .where(
@@ -31,8 +33,9 @@ async function main(): Promise<void> {
         ? or(isNull(papers.parsePath), eq(papers.parsePath, "abstract_only"))
         : undefined,
     );
+  const all = limit > 0 ? selected.slice(0, limit) : selected;
   console.log(
-    `Backfilling ${all.length} papers (vision=${vision ? "on" : "off"}, onlyMissing=${onlyMissing})...`,
+    `Backfilling ${all.length} papers (vision=${vision ? "on" : "off"}, onlyMissing=${onlyMissing}, limit=${limit || "none"})...`,
   );
 
   let upgraded = 0;
