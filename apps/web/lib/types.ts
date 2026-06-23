@@ -140,6 +140,44 @@ export type PaperContext =
       citedBy: DiscoveryCandidate[];
     };
 
+export type CriticContradiction = {
+  id: string;
+  verdict: string; // genuine | definitional | scope_dependent | overstated
+  rationale: string | null;
+  confidence: string | null;
+  severity: string | null;
+  synthesisRationale: string | null;
+  fromClaimText: string | null;
+  fromPaperTitle: string | null;
+  toClaimText: string | null;
+  toPaperTitle: string | null;
+};
+export type CriticFinding = {
+  id: string;
+  statement: string | null;
+  synthesisLabel: string | null;
+  labelVerdict: string; // justified | inflated | manufactured
+  groundingVerdict: string; // grounded | partially_grounded | overreach
+  independenceNote: string | null;
+  rationale: string | null;
+  confidence: string | null;
+  severity: string | null;
+};
+export type CriticLatest =
+  | { general: true }
+  | {
+      general: false;
+      hasSynthesis: boolean;
+      run: {
+        id: string;
+        createdAt: string;
+        completedAt: string | null;
+        notes: string | null;
+      } | null;
+      contradictions: CriticContradiction[];
+      findings: CriticFinding[];
+    };
+
 export type RelationType = "supports" | "contradicts" | "extends";
 
 export type SynthesisPaper = {

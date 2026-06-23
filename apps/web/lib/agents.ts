@@ -11,7 +11,7 @@ export type Agent = {
 // real but early.
 export const AGENTS: Agent[] = [
   { id: "scribe", name: "Scribe", role: "knowledge", active: true },
-  { id: "critic", name: "Critic", role: "review", active: false },
+  { id: "critic", name: "Critic", role: "review", active: true },
   {
     id: "experimentalist",
     name: "Experimentalist",

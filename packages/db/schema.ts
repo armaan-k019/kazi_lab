@@ -373,3 +373,65 @@ export const paperExternal = pgTable(
 
 export type PaperExternal = typeof paperExternal.$inferSelect;
 export type NewPaperExternal = typeof paperExternal.$inferInsert;
+
+// The Critic audits one synthesis run: an adversarial pass over its
+// contradictions and findings. One critic run audits one synthesis run.
+export const criticRuns = pgTable("critic_runs", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  libraryId: uuid("library_id")
+    .notNull()
+    .references(() => libraries.id, { onDelete: "cascade" }),
+  synthesisRunId: uuid("synthesis_run_id")
+    .notNull()
+    .references(() => synthesisRuns.id, { onDelete: "cascade" }),
+  model: text("model"),
+  status: text("status").notNull().default("running"), // running | completed | failed
+  notes: text("notes"),
+  error: text("error"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  completedAt: timestamp("completed_at"),
+});
+
+// Verdict on one "contradicts" claim relation: is the conflict real or an
+// artifact? Provenance via claim_relation_id.
+export const contradictionVerdicts = pgTable("contradiction_verdicts", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  criticRunId: uuid("critic_run_id")
+    .notNull()
+    .references(() => criticRuns.id, { onDelete: "cascade" }),
+  claimRelationId: uuid("claim_relation_id")
+    .notNull()
+    .references(() => claimRelations.id, { onDelete: "cascade" }),
+  verdict: text("verdict").notNull(), // genuine | definitional | scope_dependent | overstated
+  rationale: text("rationale"),
+  confidence: text("confidence"), // low | medium | high
+  severity: text("severity"), // high | medium | low; null for a clean "genuine"
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+// Verdict on one finding: is its strength label justified, and does it follow
+// from its supporting passages? Provenance via finding_id.
+export const findingVerdicts = pgTable("finding_verdicts", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  criticRunId: uuid("critic_run_id")
+    .notNull()
+    .references(() => criticRuns.id, { onDelete: "cascade" }),
+  findingId: uuid("finding_id")
+    .notNull()
+    .references(() => findings.id, { onDelete: "cascade" }),
+  labelVerdict: text("label_verdict").notNull(), // justified | inflated | manufactured
+  groundingVerdict: text("grounding_verdict").notNull(), // grounded | partially_grounded | overreach
+  independenceNote: text("independence_note"),
+  rationale: text("rationale"),
+  confidence: text("confidence"), // low | medium | high
+  severity: text("severity"), // high | medium | low; null for a clean pass
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export type CriticRun = typeof criticRuns.$inferSelect;
+export type NewCriticRun = typeof criticRuns.$inferInsert;
+export type ContradictionVerdict = typeof contradictionVerdicts.$inferSelect;
+export type NewContradictionVerdict =
+  typeof contradictionVerdicts.$inferInsert;
+export type FindingVerdict = typeof findingVerdicts.$inferSelect;
+export type NewFindingVerdict = typeof findingVerdicts.$inferInsert;

@@ -5,6 +5,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { Header } from "@/components/header";
 import { TabBar } from "@/components/tab-bar";
 import { ScribeView } from "@/components/scribe/scribe-view";
+import { CriticView } from "@/components/critic/critic-view";
 import { DormantView } from "@/components/dormant-view";
 import { AGENTS, type AgentId } from "@/lib/agents";
 
@@ -28,6 +29,8 @@ export default function Home() {
           >
             {active === "scribe" ? (
               <ScribeView />
+            ) : active === "critic" ? (
+              <CriticView />
             ) : (
               <DormantView agent={agent} />
             )}
