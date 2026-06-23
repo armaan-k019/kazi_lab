@@ -1,5 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
-import type { SourcePaperData } from "./types";
+import { RAW_TEXT_CAP, type SourcePaperData } from "./types";
 
 // Bump this whenever the extraction prompt below changes, so stored extractions
 // record which prompt produced them.
@@ -132,13 +132,18 @@ export async function extractPaperFields(
 
   const infer = paper.metadataConfidence === "inferred";
 
+  // Preserve the prior ~40k extraction input now that stored rawText can be
+  // much larger (table-aware parses). This does not change extraction behavior;
+  // it keeps the model input the same size as before.
+  const extractText = paper.rawText.slice(0, RAW_TEXT_CAP);
+
   const userMessage = infer
     ? [
         paper.title ? `Title hint (may be wrong, verify against the text): ${paper.title}` : "",
         `Source: ${paper.url}`,
         "",
         `Extracted text:`,
-        paper.rawText,
+        extractText,
       ]
         .filter(Boolean)
         .join("\n")
@@ -148,7 +153,7 @@ export async function extractPaperFields(
         "",
         `Abstract: ${paper.abstract ?? ""}`,
         "",
-        `Full text: ${paper.rawText}`,
+        `Full text: ${extractText}`,
       ].join("\n");
 
   const response = await client.messages.create({

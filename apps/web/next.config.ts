@@ -6,7 +6,13 @@ const nextConfig: NextConfig = {
   // These have dynamic/native requires that should resolve at runtime rather
   // than be bundled: node-postgres, the PDF parser, and jsdom (used by the
   // any-URL ingestion path server-side).
-  serverExternalPackages: ["pg", "pdf-parse", "jsdom"],
+  serverExternalPackages: [
+    "pg",
+    "pdf-parse",
+    "jsdom",
+    "@napi-rs/canvas",
+    "pdfjs-dist",
+  ],
 };
 
 export default nextConfig;

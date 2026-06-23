@@ -1,5 +1,14 @@
 import { XMLParser } from "fast-xml-parser";
-import type { SourcePaperData } from "./types";
+import { fetchArxivHtmlText } from "./arxiv-html-fetcher";
+import { transcribePdfWithVision } from "./pdf-vision";
+import { pdfParseText } from "./pdf-fetcher";
+import { fetchWithTimeout } from "./http";
+import {
+  STORED_TEXT_CAP,
+  type FetchOptions,
+  type ParsePath,
+  type SourcePaperData,
+} from "./types";
 
 const ARXIV_API = "http://export.arxiv.org/api/query";
 const USER_AGENT = "kazi-lab/0.1 (research)";
@@ -75,6 +84,7 @@ async function fetchArxivXml(arxivId: string): Promise<string> {
 
 export async function fetchArxivPaper(
   arxivUrl: string,
+  opts: FetchOptions = {},
 ): Promise<SourcePaperData> {
   const arxivId = extractArxivId(arxivUrl);
 
@@ -121,8 +131,40 @@ export async function fetchArxivPaper(
 
   const url = `https://arxiv.org/abs/${arxivId}`;
 
-  // arXiv raw_text is title + abstract (the arXiv path is unchanged).
-  const rawText = `${title}\n\n${abstract}`;
+  // Full text, best-effort and table-aware, with graceful fallback. Order:
+  //   1. arXiv HTML (tables as GFM markdown) - the primary, reliable win
+  //   2. vision transcription of the PDF (opt-in; tables as markdown)
+  //   3. pdf-parse of the PDF (full flat text; tables flattened)
+  //   4. title + abstract only (older papers with none of the above)
+  // arXiv metadata stays high-confidence regardless of the full-text path.
+  let rawText = `${title}\n\n${abstract}`;
+  let parsePath: ParsePath = "abstract_only";
+  let tableCount = 0;
+
+  const html = await fetchArxivHtmlText(arxivId).catch(() => null);
+  if (html) {
+    rawText = `${title}\n\n${html.markdown}`;
+    parsePath = "arxiv_html";
+    tableCount = html.tableCount;
+  } else {
+    // Fetch the PDF bytes once for the vision and/or pdf-parse fallbacks.
+    const bytes = await fetchWithTimeout(pdfUrl)
+      .then((r) => (r.ok ? r.arrayBuffer() : null))
+      .catch(() => null);
+    const vision =
+      opts.vision && bytes ? await transcribePdfWithVision(bytes).catch(() => null) : null;
+    if (vision) {
+      rawText = `${title}\n\n${vision.markdown}`;
+      parsePath = "vision";
+      tableCount = vision.tableCount;
+    } else if (bytes) {
+      const flat = await pdfParseText(bytes).catch(() => null);
+      if (flat) {
+        rawText = `${title}\n\n${flat}`.slice(0, STORED_TEXT_CAP);
+        parsePath = "pdf_parse_fallback";
+      }
+    }
+  }
 
   return {
     sourceType: "arxiv",
@@ -135,5 +177,7 @@ export async function fetchArxivPaper(
     pdfUrl,
     rawText,
     metadataConfidence: "high",
+    parsePath,
+    tableCount,
   };
 }

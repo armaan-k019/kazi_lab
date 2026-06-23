@@ -10,20 +10,26 @@
     "ingest": "tsx src/cli.ts",
     "synthesize": "tsx src/synthesize-cli.ts",
     "embed-backfill": "tsx src/embed-backfill-cli.ts",
-    "enrich-backfill": "tsx src/enrich-backfill-cli.ts"
+    "enrich-backfill": "tsx src/enrich-backfill-cli.ts",
+    "backfill-text": "tsx src/backfill-text-cli.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.102.0",
     "@kazi-lab/db": "workspace:*",
     "@mozilla/readability": "^0.6.0",
+    "@napi-rs/canvas": "^1.0.0",
     "dotenv": "^17.4.2",
     "drizzle-orm": "^0.45.2",
     "fast-xml-parser": "^5.8.0",
     "jsdom": "^29.1.1",
-    "pdf-parse": "^2.4.5"
+    "pdf-parse": "^2.4.5",
+    "pdfjs-dist": "^6.0.227",
+    "turndown": "^7.2.4",
+    "turndown-plugin-gfm": "^1.0.2"
   },
   "devDependencies": {
     "@types/jsdom": "^28.0.3",
+    "@types/turndown": "^5.0.6",
     "tsx": "^4.22.4"
   }
 }

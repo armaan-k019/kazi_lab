@@ -10,6 +10,7 @@ import {
   papers,
 } from "@kazi-lab/db";
 import { fetchSource } from "./fetch-source";
+import { sanitizeText } from "./markdown";
 import { extractPaperFields } from "./extractor";
 import { buildPaperSummary, embedAndStorePaper } from "./embed-store";
 import { enrichPaperExternal } from "./enrich-store";
@@ -110,7 +111,9 @@ export async function ingestPaper(
         publishedAt: finalPublishedAt,
         url: paper.url,
         pdfUrl: paper.pdfUrl,
-        rawText: paper.rawText,
+        rawText: sanitizeText(paper.rawText),
+        parsePath: paper.parsePath,
+        tableCount: paper.tableCount,
       })
       .returning({ id: papers.id });
     const paperId = insertedPaper.id;

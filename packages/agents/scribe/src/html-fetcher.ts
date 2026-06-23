@@ -1,12 +1,16 @@
 import { Readability } from "@mozilla/readability";
 import { JSDOM } from "jsdom";
 import { fetchWithTimeout } from "./http";
-import { RAW_TEXT_CAP, type SourcePaperData } from "./types";
+import { htmlToMarkdown, countMarkdownTables } from "./markdown";
+import { STORED_TEXT_CAP, type SourcePaperData } from "./types";
 
 const MIN_USABLE_CHARS = 200;
 
 function visibleLength(s: string): number {
   return s.replace(/\s/g, "").length;
+}
+function normalize(s: string): string {
+  return s.replace(/\s+/g, " ").trim().toLowerCase();
 }
 
 export async function fetchHtmlPaper(
@@ -26,36 +30,56 @@ export async function fetchHtmlPaper(
   }
 
   let title = "";
-  let content = "";
+  let proseMarkdown = "";
 
-  // Readability mutates the document it parses, so run it on its own DOM.
+  // Readability for the main prose. Convert its content HTML to markdown so any
+  // tables it kept survive as GFM (textContent would flatten them). Readability
+  // mutates its DOM, so run it on its own.
   try {
     const dom = new JSDOM(html, { url });
     const article = new Readability(dom.window.document).parse();
     if (article) {
       title = (article.title ?? "").trim();
-      content = (article.textContent ?? "").replace(/[ \t]+\n/g, "\n").trim();
+      if (article.content) proseMarkdown = htmlToMarkdown(article.content);
     }
   } catch {
-    // fall through to basic extraction below
+    // fall through to stripped text below
   }
 
-  // Fallback: strip tags from a fresh DOM if Readability gave little/nothing.
-  if (visibleLength(content) < MIN_USABLE_CHARS) {
+  // Fallback: stripped text if Readability gave little/nothing.
+  if (visibleLength(proseMarkdown) < MIN_USABLE_CHARS) {
     const dom = new JSDOM(html, { url });
     const doc = dom.window.document;
     if (!title) title = (doc.querySelector("title")?.textContent ?? "").trim();
-    content = (doc.body?.textContent ?? "").replace(/\s+/g, " ").trim();
+    proseMarkdown = (doc.body?.textContent ?? "").replace(/\s+/g, " ").trim();
   }
 
+  // Recover tables Readability dropped: convert every <table> in the original
+  // document to markdown and append any not already present in the prose.
+  let tablesMarkdown = "";
+  try {
+    const dom = new JSDOM(html, { url });
+    const proseNorm = normalize(proseMarkdown);
+    const seen = new Set<string>();
+    dom.window.document.querySelectorAll("table").forEach((tbl) => {
+      const md = htmlToMarkdown(tbl.outerHTML).trim();
+      const key = normalize(md);
+      if (md.length < 8 || seen.has(key)) return;
+      seen.add(key);
+      if (proseNorm.includes(key.slice(0, 80))) return; // already inline
+      tablesMarkdown += `\n\n${md}`;
+    });
+  } catch {
+    // tables are best-effort
+  }
+
+  let content = (proseMarkdown + tablesMarkdown).trim();
   if (visibleLength(content) < MIN_USABLE_CHARS) {
     throw new Error(
       "Could not extract readable content from this page (it may be empty, paywalled, or rendered entirely with JavaScript).",
     );
   }
-
-  // Cap to control token cost; the extractor infers metadata from this text.
-  const rawText = content.slice(0, RAW_TEXT_CAP);
+  if (content.length > STORED_TEXT_CAP) content = content.slice(0, STORED_TEXT_CAP);
 
   return {
     sourceType: "html",
@@ -66,7 +90,9 @@ export async function fetchHtmlPaper(
     publishedAt: null,
     url,
     pdfUrl: null,
-    rawText,
+    rawText: content,
     metadataConfidence: "inferred",
+    parsePath: "readability_tables",
+    tableCount: countMarkdownTables(content),
   };
 }

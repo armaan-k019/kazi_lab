@@ -30,6 +30,10 @@ export const papers = pgTable("papers", {
   url: text("url").notNull(),
   pdfUrl: text("pdf_url"),
   rawText: text("raw_text"),
+  // Parse provenance for the stored text (table-aware ingestion): which path
+  // produced raw_text and how many tables it preserved. Used for coverage.
+  parsePath: text("parse_path"), // arxiv_html | vision | readability_tables | pdf_parse_fallback | abstract_only
+  tableCount: integer("table_count"),
   ingestedAt: timestamp("ingested_at").notNull().defaultNow(),
   lastProcessedAt: timestamp("last_processed_at"),
 });
