@@ -71,6 +71,13 @@
       "when": 1782236846667,
       "tag": "0009_yellow_skreet",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1782262943745,
+      "tag": "0010_public_magma",
+      "breakpoints": true
     }
   ]
 }

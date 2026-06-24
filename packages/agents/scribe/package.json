@@ -11,7 +11,8 @@
     "synthesize": "tsx src/synthesize-cli.ts",
     "embed-backfill": "tsx src/embed-backfill-cli.ts",
     "enrich-backfill": "tsx src/enrich-backfill-cli.ts",
-    "backfill-text": "tsx src/backfill-text-cli.ts"
+    "backfill-text": "tsx src/backfill-text-cli.ts",
+    "extract-metrics": "tsx src/extract-metrics-cli.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.102.0",

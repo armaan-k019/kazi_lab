@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import {
+  boolean,
   index,
   integer,
   numeric,
@@ -493,3 +494,44 @@ export type NewContradictionVerdict =
   typeof contradictionVerdicts.$inferInsert;
 export type FindingVerdict = typeof findingVerdicts.$inferSelect;
 export type NewFindingVerdict = typeof findingVerdicts.$inferInsert;
+
+// Structured quantitative results pulled from a paper's tables/inline text, one
+// row per reported number, so the same metric on the same dataset/task can be
+// pooled across papers. (dataset_norm, metric_norm, task) is the join key for
+// meta-analysis, hence the index.
+export const paperMetrics = pgTable(
+  "paper_metrics",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    paperId: uuid("paper_id")
+      .notNull()
+      .references(() => papers.id, { onDelete: "cascade" }),
+    methodName: text("method_name"), // the model/approach the number describes
+    isSelf: boolean("is_self"), // true = the paper's own proposed method
+    task: text("task"),
+    datasetRaw: text("dataset_raw"),
+    datasetNorm: text("dataset_norm"),
+    metricRaw: text("metric_raw"),
+    metricNorm: text("metric_norm"),
+    value: numeric("value"),
+    unit: text("unit"),
+    dispersion: text("dispersion"), // std dev / CI / +- as reported, else null
+    sampleSize: text("sample_size"), // n / #views / #runs as reported, else null
+    conditions: text("conditions"), // qualifying conditions, else null
+    sourceKind: text("source_kind"), // table | inline_text
+    sourceExcerpt: text("source_excerpt"), // the row/sentence the number came from
+    confidence: text("confidence"), // low | medium | high
+    extractionVersion: text("extraction_version"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (table) => [
+    index("paper_metrics_joinkey_idx").on(
+      table.datasetNorm,
+      table.metricNorm,
+      table.task,
+    ),
+  ],
+);
+
+export type PaperMetric = typeof paperMetrics.$inferSelect;
+export type NewPaperMetric = typeof paperMetrics.$inferInsert;

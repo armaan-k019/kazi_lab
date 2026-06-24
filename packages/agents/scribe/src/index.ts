@@ -51,3 +51,8 @@ export {
   type ResolvablePaper,
 } from "./resolve-external";
 export { enrichPaperExternal } from "./enrich-store";
+export {
+  extractPaperMetrics,
+  METRIC_EXTRACTION_VERSION,
+  type MetricExtractionResult,
+} from "./extract-metrics";
