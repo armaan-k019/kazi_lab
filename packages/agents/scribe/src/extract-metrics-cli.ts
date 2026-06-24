@@ -29,13 +29,27 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  const libPapers = await db
+  const allLibPapers = await db
     .select({ id: papers.id, title: papers.title, parsePath: papers.parsePath })
     .from(papers)
     .innerJoin(paperLibraries, eq(paperLibraries.paperId, papers.id))
     .where(eq(paperLibraries.libraryId, lib.id));
 
-  console.log(`Extracting metrics for ${libPapers.length} papers in "${lib.name}"...\n`);
+  // ONLY_MISSING re-runs only papers that currently have zero metric rows
+  // (recover transient skips / truncations), idempotently.
+  let libPapers = allLibPapers;
+  if (process.env.ONLY_MISSING === "1") {
+    const counts = await db
+      .select({ paperId: paperMetrics.paperId, c: sql<number>`count(*)::int` })
+      .from(paperMetrics)
+      .groupBy(paperMetrics.paperId);
+    const have = new Set(counts.filter((r) => r.c > 0).map((r) => r.paperId));
+    libPapers = allLibPapers.filter((p) => !have.has(p.id));
+  }
+
+  console.log(
+    `Extracting metrics for ${libPapers.length}/${allLibPapers.length} papers in "${lib.name}"${process.env.ONLY_MISSING === "1" ? " (only-missing)" : ""}...\n`,
+  );
   let withMetrics = 0;
   let zero = 0;
   let skipped = 0;
@@ -90,8 +104,8 @@ async function main(): Promise<void> {
     order by papers desc, rows desc
     limit 12`)).rows;
 
-  console.log("\n=== COVERAGE ===");
-  console.log(`papers: ${libPapers.length} | with metrics: ${withMetrics} | zero: ${zero} | skipped: ${skipped}`);
+  console.log("\n=== COVERAGE (this run) ===");
+  console.log(`library papers: ${allLibPapers.length} | processed: ${libPapers.length} | with metrics: ${withMetrics} | zero: ${zero} | skipped: ${skipped}`);
   console.log(`total metric rows: ${total} | distinct (dataset,metric,task) keys: ${distinct_keys}`);
   console.log(`rows with dispersion: ${with_disp ?? 0}/${total} | rows with sample_size: ${with_n ?? 0}/${total}`);
   console.log("\n=== TOP SHARED KEYS (dataset | metric | task : papers, methods, rows) ===");

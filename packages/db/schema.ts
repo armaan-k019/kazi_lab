@@ -513,6 +513,13 @@ export const paperMetrics = pgTable(
     datasetNorm: text("dataset_norm"),
     metricRaw: text("metric_raw"),
     metricNorm: text("metric_norm"),
+    // Additive canonical fields for pooling. Derived from *_norm/task via an
+    // auditable alias map (see scribe/metric-aliases.ts); merges only genuine
+    // equivalents. Raw + norm above are left untouched so every merge is
+    // reversible and auditable.
+    datasetCanon: text("dataset_canon"),
+    metricCanon: text("metric_canon"),
+    taskCanon: text("task_canon"),
     value: numeric("value"),
     unit: text("unit"),
     dispersion: text("dispersion"), // std dev / CI / +- as reported, else null
@@ -529,6 +536,11 @@ export const paperMetrics = pgTable(
       table.datasetNorm,
       table.metricNorm,
       table.task,
+    ),
+    index("paper_metrics_canonkey_idx").on(
+      table.datasetCanon,
+      table.metricCanon,
+      table.taskCanon,
     ),
   ],
 );

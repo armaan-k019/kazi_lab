@@ -1,6 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { eq } from "drizzle-orm";
 import { db, paperMetrics, papers } from "@kazi-lab/db";
+import { canonDataset, canonMetric, canonTask } from "./metric-aliases";
 
 // Metric extraction is structured reading of the (table-bearing) text, not the
 // hard cross-paper judgment Opus does, so Sonnet is enough.
@@ -15,8 +16,8 @@ const TEXT_CAP = 150_000;
 // generously (rows carry a source_excerpt, so JSON is verbose) but under Sonnet
 // 4.6's 64k output limit. The truncation guard is the backstop.
 const BASE_TOKENS = 12_000;
-const TOKENS_PER_KCHAR = 280; // large (150k-char) papers should reach the cap
-const MAX_OUTPUT_CAP = 48_000;
+const TOKENS_PER_KCHAR = 320; // large (150k-char) papers should reach the cap
+const MAX_OUTPUT_CAP = 60_000; // under Sonnet 4.6's 64k output limit
 function metricMaxTokens(textLen: number): number {
   return Math.min(
     MAX_OUTPUT_CAP,
@@ -186,15 +187,21 @@ export async function extractPaperMetrics(
         m.confidence === "low" || m.confidence === "medium" || m.confidence === "high"
           ? m.confidence
           : null;
+      const task = str(m.task);
+      const datasetNorm = str(m.dataset_norm) ?? str(m.dataset_raw);
+      const metricNorm = str(m.metric_norm) ?? metricRaw;
       return {
         paperId,
         methodName: str(m.method_name),
         isSelf: typeof m.is_self === "boolean" ? m.is_self : false,
-        task: str(m.task),
+        task,
         datasetRaw: str(m.dataset_raw),
-        datasetNorm: str(m.dataset_norm) ?? str(m.dataset_raw),
+        datasetNorm,
         metricRaw,
-        metricNorm: str(m.metric_norm) ?? metricRaw,
+        metricNorm,
+        datasetCanon: canonDataset(datasetNorm),
+        metricCanon: canonMetric(metricNorm),
+        taskCanon: canonTask(task),
         value: String(value),
         unit: str(m.unit),
         dispersion: str(m.dispersion),

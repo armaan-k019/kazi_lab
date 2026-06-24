@@ -12,7 +12,8 @@
     "embed-backfill": "tsx src/embed-backfill-cli.ts",
     "enrich-backfill": "tsx src/enrich-backfill-cli.ts",
     "backfill-text": "tsx src/backfill-text-cli.ts",
-    "extract-metrics": "tsx src/extract-metrics-cli.ts"
+    "extract-metrics": "tsx src/extract-metrics-cli.ts",
+    "metric-pool": "tsx src/metric-pool-cli.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.102.0",
