@@ -268,3 +268,37 @@ export type SynthesisResults = {
   relations: SynthesisRelation[];
   openQuestions: SynthesisOpenQuestion[];
 };
+
+// Lab-level cross-domain synthesis (shapes from /api/cross-domain/latest).
+export type CrossDomainLevel = "method" | "claim" | "concept";
+
+export type CrossDomainEvidence = {
+  id: string;
+  libraryName: string;
+  kind: "method" | "finding" | "claim";
+  ref: string;
+  excerpt: string | null;
+};
+
+export type CrossDomainLink = {
+  id: string;
+  level: CrossDomainLevel;
+  summary: string;
+  confidence: string | null;
+  isCandidate: boolean;
+  rationale: string | null;
+  libraries: { id: string; name: string }[];
+  evidence: CrossDomainEvidence[];
+};
+
+export type CrossDomainLatest = {
+  eligible: { id: string; name: string }[];
+  run: {
+    id: string;
+    scope: string[];
+    notes: string | null;
+    createdAt: string;
+    completedAt: string | null;
+  } | null;
+  links: CrossDomainLink[];
+};

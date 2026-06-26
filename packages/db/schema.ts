@@ -547,3 +547,80 @@ export const paperMetrics = pgTable(
 
 export type PaperMetric = typeof paperMetrics.$inferSelect;
 export type NewPaperMetric = typeof paperMetrics.$inferInsert;
+
+// ---------------------------------------------------------------------------
+// Lab-level cross-domain synthesis: reads across MULTIPLE libraries (projects)
+// and records what genuinely recurs across domains, grounded in concrete
+// evidence. A run is a snapshot over a chosen set of libraries. Distinct from
+// the per-library Scribe synthesis and Critic audit, which never see across
+// projects. This layer ASSERTS grounded method/claim recurrences and RECORDS
+// concept-level rhymes as candidates for the cross-domain Critic (later) to test.
+// ---------------------------------------------------------------------------
+
+export const crossDomainRuns = pgTable("cross_domain_runs", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  // The library ids this run analyzed (the eligible, non-general, synthesized set).
+  scope: uuid("scope").array().notNull().default(sql`'{}'::uuid[]`),
+  model: text("model"),
+  status: text("status").notNull().default("running"), // running | completed | failed
+  notes: text("notes"),
+  error: text("error"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  completedAt: timestamp("completed_at"),
+});
+
+// One cross-domain recurrence. level is the grounding it rests on:
+//   method  = the same algorithm/technique appears in multiple libraries.
+//   claim   = the same kind of audited finding recurs across libraries.
+//   concept = an emergent rhyme that POINTS TO underlying method/claim links;
+//             never asserted on its own, always is_candidate.
+// is_candidate = true means "needs cross-domain Critic pressure-testing", not
+// established. library_ids names the libraries it spans (>=2).
+export const crossDomainLinks = pgTable(
+  "cross_domain_links",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    crossDomainRunId: uuid("cross_domain_run_id")
+      .notNull()
+      .references(() => crossDomainRuns.id, { onDelete: "cascade" }),
+    level: text("level").notNull(), // method | claim | concept
+    summary: text("summary").notNull(), // the recurrence stated plainly
+    libraryIds: uuid("library_ids").array().notNull().default(sql`'{}'::uuid[]`),
+    confidence: text("confidence"), // low | medium | high
+    isCandidate: boolean("is_candidate").notNull().default(false),
+    rationale: text("rationale"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (table) => [
+    index("cross_domain_links_run_level_idx").on(
+      table.crossDomainRunId,
+      table.level,
+    ),
+  ],
+);
+
+// Concrete provenance for one link: the specific method/finding/claim in one
+// specific library it rests on. Every link has >=2 of these (>=1 per library it
+// spans); a link whose evidence cannot be validated is not stored.
+export const crossDomainLinkEvidence = pgTable("cross_domain_link_evidence", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  linkId: uuid("link_id")
+    .notNull()
+    .references(() => crossDomainLinks.id, { onDelete: "cascade" }),
+  libraryId: uuid("library_id")
+    .notNull()
+    .references(() => libraries.id, { onDelete: "cascade" }),
+  evidenceKind: text("evidence_kind").notNull(), // method | finding | claim
+  evidenceRef: text("evidence_ref").notNull(), // method_name or finding_id/claim_id
+  excerpt: text("excerpt"), // the concrete thing + its context (e.g. finding text + Critic verdict)
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export type CrossDomainRun = typeof crossDomainRuns.$inferSelect;
+export type NewCrossDomainRun = typeof crossDomainRuns.$inferInsert;
+export type CrossDomainLink = typeof crossDomainLinks.$inferSelect;
+export type NewCrossDomainLink = typeof crossDomainLinks.$inferInsert;
+export type CrossDomainLinkEvidence =
+  typeof crossDomainLinkEvidence.$inferSelect;
+export type NewCrossDomainLinkEvidence =
+  typeof crossDomainLinkEvidence.$inferInsert;

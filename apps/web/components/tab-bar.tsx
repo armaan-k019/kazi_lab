@@ -1,16 +1,16 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { AGENTS, type AgentId } from "@/lib/agents";
+import { AGENTS, type ViewId } from "@/lib/agents";
 
 type Props = {
-  active: AgentId;
-  onSelect: (id: AgentId) => void;
+  active: ViewId;
+  onSelect: (id: ViewId) => void;
 };
 
 export function TabBar({ active, onSelect }: Props) {
   return (
-    <nav className="flex flex-wrap gap-x-8 gap-y-3 border-b border-border">
+    <nav className="flex flex-wrap items-stretch gap-x-8 gap-y-3 border-b border-border">
       {AGENTS.map((agent) => {
         const isActive = agent.id === active;
         const clickable = agent.active;
@@ -56,7 +56,54 @@ export function TabBar({ active, onSelect }: Props) {
           </button>
         );
       })}
+
+      {/* Lab-level view (reads across projects), set apart from the agent tabs. */}
+      <LabTab
+        active={active === "cross-domain"}
+        onSelect={() => onSelect("cross-domain")}
+      />
     </nav>
+  );
+}
+
+function LabTab({
+  active,
+  onSelect,
+}: {
+  active: boolean;
+  onSelect: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      className="group relative -mb-px ml-auto flex flex-col items-start pb-3 pt-1 text-left"
+      aria-current={active ? "page" : undefined}
+    >
+      <span className="flex items-center gap-2">
+        <span
+          className="h-2 w-2 rounded-sm bg-accent/80"
+          aria-hidden="true"
+        />
+        <span
+          className={[
+            "text-sm font-medium transition-colors",
+            active ? "text-text-primary" : "text-text-secondary group-hover:text-text-primary",
+          ].join(" ")}
+        >
+          Cross-Domain
+        </span>
+      </span>
+      <span className="mt-1 pl-[18px] text-[12px] text-text-muted">lab, across projects</span>
+
+      {active && (
+        <motion.span
+          layoutId="tab-underline"
+          className="absolute inset-x-0 bottom-0 h-0.5 rounded-full bg-accent"
+          transition={{ type: "spring", stiffness: 420, damping: 34 }}
+        />
+      )}
+    </button>
   );
 }
 

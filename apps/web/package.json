@@ -12,6 +12,7 @@
     "@anthropic-ai/sdk": "^0.102.0",
     "@kazi-lab/critic": "workspace:*",
     "@kazi-lab/db": "workspace:*",
+    "@kazi-lab/lab": "workspace:*",
     "@kazi-lab/scribe": "workspace:*",
     "d3-force": "^3.0.0",
     "d3-selection": "^3.0.0",

@@ -1,5 +1,9 @@
 export type AgentId = "scribe" | "critic" | "experimentalist" | "writer";
 
+// Top-level views. Agents are per-library; "cross-domain" is a lab-level view
+// that reads across projects, so it lives in the nav but is not an agent.
+export type ViewId = AgentId | "cross-domain";
+
 export type Agent = {
   id: AgentId;
   name: string;

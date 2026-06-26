@@ -6,12 +6,13 @@ import { Header } from "@/components/header";
 import { TabBar } from "@/components/tab-bar";
 import { ScribeView } from "@/components/scribe/scribe-view";
 import { CriticView } from "@/components/critic/critic-view";
+import { CrossDomainView } from "@/components/cross-domain/cross-domain-view";
 import { DormantView } from "@/components/dormant-view";
-import { AGENTS, type AgentId } from "@/lib/agents";
+import { AGENTS, type ViewId } from "@/lib/agents";
 
 export default function Home() {
-  const [active, setActive] = useState<AgentId>("scribe");
-  const agent = AGENTS.find((a) => a.id === active)!;
+  const [active, setActive] = useState<ViewId>("scribe");
+  const agent = AGENTS.find((a) => a.id === active);
 
   return (
     <main className="mx-auto w-full max-w-5xl px-6 pb-32">
@@ -31,9 +32,11 @@ export default function Home() {
               <ScribeView />
             ) : active === "critic" ? (
               <CriticView />
-            ) : (
+            ) : active === "cross-domain" ? (
+              <CrossDomainView />
+            ) : agent ? (
               <DormantView agent={agent} />
-            )}
+            ) : null}
           </motion.section>
         </AnimatePresence>
       </div>
