@@ -3,6 +3,7 @@ import {
   boolean,
   index,
   integer,
+  jsonb,
   numeric,
   pgTable,
   primaryKey,
@@ -676,3 +677,104 @@ export type CrossDomainCriticRun = typeof crossDomainCriticRuns.$inferSelect;
 export type NewCrossDomainCriticRun = typeof crossDomainCriticRuns.$inferInsert;
 export type LinkVerdict = typeof linkVerdicts.$inferSelect;
 export type NewLinkVerdict = typeof linkVerdicts.$inferInsert;
+
+// ---------------------------------------------------------------------------
+// Experimentalist: takes a CLAIM + an EVIDENCE SCOPE (one or more libraries)
+// and produces (A) a deterministic quantitative meta-analysis of what the
+// literature already reports (pooling math in TypeScript over paper_metrics, NO
+// LLM number), interpreted by an LLM, and (B) a verifiable, execution-ready
+// experiment spec. Execution itself is a separate future layer, not built here.
+// A run is an immutable snapshot. Library-agnostic: three input modes resolve to
+// the same claim+scope contract.
+// ---------------------------------------------------------------------------
+
+export const experimentalistRuns = pgTable("experimentalist_runs", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  inputKind: text("input_kind").notNull(), // abstract | cross_domain_link | library
+  inputRef: text("input_ref").notNull(), // the abstract id / link id / library id
+  claim: text("claim").notNull(), // the claim under test, as resolved/derived
+  scopeLibraryIds: uuid("scope_library_ids").array().notNull().default(sql`'{}'::uuid[]`),
+  model: text("model"),
+  status: text("status").notNull().default("running"), // running | completed | failed
+  // The LLM's interpretation of the COMPUTED tables, kept clearly separate from
+  // the numbers: { verdict, text, caveats[], unknowns[], keysCited[], findingsCited[] }.
+  interpretation: jsonb("interpretation"),
+  notes: text("notes"),
+  error: text("error"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  completedAt: timestamp("completed_at"),
+});
+
+// One deterministically pooled result: a (dataset, metric, task, conditions)
+// slice under one pooling kind. computed holds the full computed table
+// (contributing rows, ranks/win-rates/medians, conflict flags, dedup notes).
+// NO LLM writes any number here.
+export const metaAnalyses = pgTable(
+  "meta_analyses",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    runId: uuid("run_id")
+      .notNull()
+      .references(() => experimentalistRuns.id, { onDelete: "cascade" }),
+    keyDataset: text("key_dataset"), // dataset_canon
+    keyMetric: text("key_metric"), // metric_canon
+    keyTask: text("key_task"), // task_canon
+    keyConditions: text("key_conditions"), // the protocol/flavor slice
+    poolKind: text("pool_kind").notNull(), // vote_count | rank | best_median | variance_weighted_subset
+    computed: jsonb("computed").notNull(),
+    nMethods: integer("n_methods"),
+    nPapers: integer("n_papers"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (table) => [index("meta_analyses_run_idx").on(table.runId)],
+);
+
+// The honest-degradation path: for a scope library with no metric rows, the
+// qualitative evidence (audited-sound findings relevant to the claim) that
+// stands in for pooling. Never a fabricated number.
+export const qualitativeEvidence = pgTable(
+  "qualitative_evidence",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    runId: uuid("run_id")
+      .notNull()
+      .references(() => experimentalistRuns.id, { onDelete: "cascade" }),
+    libraryId: uuid("library_id")
+      .notNull()
+      .references(() => libraries.id, { onDelete: "cascade" }),
+    findingRef: uuid("finding_ref"), // the finding id, for provenance
+    excerpt: text("excerpt"),
+    relevanceNote: text("relevance_note"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (table) => [index("qualitative_evidence_run_idx").on(table.runId)],
+);
+
+// The execution-ready experiment spec (one per run). The LLM designs it grounded
+// in the meta-analysis; nothing is executed. Structured fields are jsonb.
+export const experimentSpecs = pgTable("experiment_specs", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  runId: uuid("run_id")
+    .notNull()
+    .references(() => experimentalistRuns.id, { onDelete: "cascade" }),
+  title: text("title"),
+  objective: text("objective"), // the claim restated as the thing the experiment decides
+  design: jsonb("design"), // { arms[], held_fixed[], procedure }
+  metrics: jsonb("metrics"), // what is measured, on what datasets, why
+  confirmCriteria: text("confirm_criteria"), // explicit outcome that CONFIRMS the claim
+  refuteCriteria: text("refute_criteria"), // explicit outcome that REFUTES it
+  environment: jsonb("environment"), // { dependencies, datasets, hardware, scale_notes }
+  verificationHarness: text("verification_harness"), // how a result would be checked
+  humanDecisions: jsonb("human_decisions"), // choices deliberately left to a human
+  limitations: text("limitations"), // what this design cannot settle
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export type ExperimentalistRun = typeof experimentalistRuns.$inferSelect;
+export type NewExperimentalistRun = typeof experimentalistRuns.$inferInsert;
+export type MetaAnalysis = typeof metaAnalyses.$inferSelect;
+export type NewMetaAnalysis = typeof metaAnalyses.$inferInsert;
+export type QualitativeEvidence = typeof qualitativeEvidence.$inferSelect;
+export type NewQualitativeEvidence = typeof qualitativeEvidence.$inferInsert;
+export type ExperimentSpec = typeof experimentSpecs.$inferSelect;
+export type NewExperimentSpec = typeof experimentSpecs.$inferInsert;

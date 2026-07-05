@@ -1,0 +1,23 @@
+{
+  "name": "@kazi-lab/experimentalist",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "experiment": "tsx src/experimentalist-cli.ts",
+    "test": "tsx --test src/pooling.test.ts"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.102.0",
+    "@kazi-lab/db": "workspace:*",
+    "@kazi-lab/lab": "workspace:*",
+    "dotenv": "^17.4.2",
+    "drizzle-orm": "^0.45.2"
+  },
+  "devDependencies": {
+    "tsx": "^4.22.4"
+  }
+}

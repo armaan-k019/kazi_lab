@@ -20,7 +20,7 @@ export const AGENTS: Agent[] = [
     id: "experimentalist",
     name: "Experimentalist",
     role: "experiments",
-    active: false,
+    active: true,
   },
   { id: "writer", name: "Writer", role: "synthesis", active: false },
 ];

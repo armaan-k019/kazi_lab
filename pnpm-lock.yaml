@@ -218,6 +218,9 @@ importers:
       '@kazi-lab/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@kazi-lab/experimentalist':
+        specifier: workspace:*
+        version: link:../../packages/agents/experimentalist
       '@kazi-lab/lab':
         specifier: workspace:*
         version: link:../../packages/agents/lab
@@ -294,6 +297,28 @@ importers:
       '@kazi-lab/db':
         specifier: workspace:*
         version: link:../../db
+      dotenv:
+        specifier: ^17.4.2
+        version: 17.4.2
+      drizzle-orm:
+        specifier: ^0.45.2
+        version: 0.45.2(@types/pg@8.20.0)(pg@8.21.0)
+    devDependencies:
+      tsx:
+        specifier: ^4.22.4
+        version: 4.22.4
+
+  packages/agents/experimentalist:
+    dependencies:
+      '@anthropic-ai/sdk':
+        specifier: ^0.102.0
+        version: 0.102.0(zod@4.4.3)
+      '@kazi-lab/db':
+        specifier: workspace:*
+        version: link:../../db
+      '@kazi-lab/lab':
+        specifier: workspace:*
+        version: link:../lab
       dotenv:
         specifier: ^17.4.2
         version: 17.4.2

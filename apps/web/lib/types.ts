@@ -308,3 +308,80 @@ export type CrossDomainLatest = {
   critique: { id: string; notes: string | null; completedAt: string | null } | null;
   links: CrossDomainLink[];
 };
+
+// Experimentalist (shapes from /api/experimentalist/*).
+export type ExperimentInputs = {
+  abstracts: { id: string; library: string; claim: string }[];
+  links: {
+    id: string;
+    level: string;
+    summary: string;
+    isCandidate: boolean;
+    source: string;
+    verdict: string | null;
+    libraries: string[];
+  }[];
+  libraries: { id: string; name: string }[];
+};
+
+export type PooledMethod = {
+  method: string;
+  pooledValue: number;
+  pooledFromSelf: boolean;
+  conflict: boolean;
+};
+export type PooledRank = { method: string; meanRank: number; medianRank: number; nPapers: number };
+export type PooledWin = { method: string; wins: number; losses: number; winRate: number };
+
+export type MetaKey = {
+  dataset: string | null;
+  metric: string | null;
+  task: string | null;
+  conditions: string | null;
+  nPapers: number | null;
+  nMethods: number | null;
+  kinds: {
+    best_median?: { higherIsBetter: boolean; methods: PooledMethod[]; conflicts: { method: string; values: number[] }[] };
+    rank?: { ranks: PooledRank[] };
+    vote_count?: { winRates: PooledWin[] };
+    variance_weighted_subset?: { weightedMean: number; note: string; contributing: { method: string; value: number; std: number; paper: string }[] };
+  };
+};
+
+export type ExperimentInterpretation = {
+  verdict: string | null;
+  text: string | null;
+  caveats: string[];
+  unknowns: string[];
+  keysCited?: string[];
+  findingsCited?: string[];
+} | null;
+
+export type ExperimentSpecView = {
+  title: string | null;
+  objective: string | null;
+  design: { arms?: string[]; held_fixed?: string[]; procedure?: string } | null;
+  metrics: { measured?: string[]; datasets?: string[]; why?: string } | null;
+  confirmCriteria: string | null;
+  refuteCriteria: string | null;
+  environment: { dependencies?: string[]; datasets?: string[]; hardware?: string; scale_notes?: string } | null;
+  verificationHarness: string | null;
+  humanDecisions: string[] | null;
+  limitations: string | null;
+};
+
+export type ExperimentRun = {
+  run: {
+    id: string;
+    inputKind: string;
+    claim: string;
+    scope: string[];
+    status: string;
+    notes: string | null;
+    completedAt: string | null;
+    interpretation: ExperimentInterpretation;
+  } | null;
+  metaKeys?: MetaKey[];
+  qualitative?: { libraryName: string; findings: { findingRef: string | null; excerpt: string | null; note: string | null }[] }[];
+  spec?: ExperimentSpecView | null;
+};

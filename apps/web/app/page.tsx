@@ -7,6 +7,7 @@ import { TabBar } from "@/components/tab-bar";
 import { ScribeView } from "@/components/scribe/scribe-view";
 import { CriticView } from "@/components/critic/critic-view";
 import { CrossDomainView } from "@/components/cross-domain/cross-domain-view";
+import { ExperimentalistView } from "@/components/experimentalist/experimentalist-view";
 import { DormantView } from "@/components/dormant-view";
 import { AGENTS, type ViewId } from "@/lib/agents";
 
@@ -34,6 +35,8 @@ export default function Home() {
               <CriticView />
             ) : active === "cross-domain" ? (
               <CrossDomainView />
+            ) : active === "experimentalist" ? (
+              <ExperimentalistView />
             ) : agent ? (
               <DormantView agent={agent} />
             ) : null}
