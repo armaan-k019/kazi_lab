@@ -11,6 +11,7 @@ import {
   findingVerdicts,
   isAllPapersLibrary,
   libraries,
+  MODELS,
   openQuestions,
   paperLibraries,
   paperMetrics,
@@ -20,14 +21,14 @@ import {
 } from "@kazi-lab/db";
 
 // Cross-domain synthesis is hard judgment across multiple domains (is this the
-// SAME thing or just the same word?), so it uses Opus, the same model and call
-// conventions as Scribe synthesis and the Critic.
-const MODEL = "claude-opus-4-6";
+// SAME thing or just the same word?), so it uses the shared judgment model, the
+// same model and call conventions as Scribe synthesis and the Critic.
+const MODEL = MODELS.judgment;
 
 // Output budget scales with the number of items the model reasons over (findings
 // + methods across all libraries). Each link is a few fields plus a handful of
-// evidence rows, so a modest per-item increment over a base is plenty; capped
-// well under Opus 4.6's output ceiling. The truncation guard is the backstop.
+// evidence rows, so a modest per-item increment over a base is plenty; the cap
+// sits well under the Opus 4.8 output ceiling. The truncation guard is the backstop.
 const BASE_TOKENS = 8_000;
 const TOKENS_PER_ITEM = 60;
 const MAX_OUTPUT_CAP = 24_000;

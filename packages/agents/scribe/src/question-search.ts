@@ -1,10 +1,12 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { eq } from "drizzle-orm";
-import { db, openQuestions } from "@kazi-lab/db";
+import { db, MODELS, openQuestions } from "@kazi-lab/db";
 import { searchWorks } from "./openalex";
 import { shapeCandidates, type DiscoveryCandidate } from "./external-candidates";
 
-const DISTILL_MODEL = "claude-sonnet-4-6";
+// Distilling an open question into a keyword query is structured reading, so it
+// uses the shared extraction model (now Opus 4.8).
+const DISTILL_MODEL = MODELS.extraction;
 const RECENT_YEARS = 5;
 const SLICE = 12;
 

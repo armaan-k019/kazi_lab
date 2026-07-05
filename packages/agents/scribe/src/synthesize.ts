@@ -8,6 +8,7 @@ import {
   findings,
   findingPapers,
   libraries,
+  MODELS,
   openQuestions,
   paperLibraries,
   paperNarrations,
@@ -17,21 +18,20 @@ import {
   themes,
 } from "@kazi-lab/db";
 
-// Synthesis is the judgment-heavy task, so it uses Opus (per-paper extraction
-// uses Sonnet). claude-opus-4-6 is a current, valid Opus model with a 128k
-// max output limit (verified against Anthropic model docs).
-const MODEL = "claude-opus-4-6";
+// Synthesis is the judgment-heavy task, so it uses the shared judgment model
+// (Opus 4.8, which has a large output ceiling well above the caps below).
+const MODEL = MODELS.judgment;
 
 // Output token budget scales with paper count: the synthesis JSON
 // (themes/findings/relations/open-questions) grows with the corpus. At ~6
 // papers ~16k held comfortably; this formula gives clear headroom through
-// ~20-30 papers while staying well under Opus 4.6's 128k output ceiling. The
+// ~20-30 papers while staying well under the Opus 4.8 output ceiling. The
 // truncation guard in runSynthesis is the backstop if this is ever exceeded.
 //   maxTokens = min(BASE + perPaper * paperCount, CAP)
 // At 6 papers => 19.2k, 13 => 27.6k, 20 => capped at 32k.
 const SYNTHESIS_BASE_TOKENS = 12_000;
 const SYNTHESIS_TOKENS_PER_PAPER = 1_200;
-const SYNTHESIS_MAX_OUTPUT_CAP = 32_000; // generous; Opus 4.6 allows up to 128k
+const SYNTHESIS_MAX_OUTPUT_CAP = 32_000; // generous backstop; well under Opus 4.8's ceiling
 function synthesisMaxTokens(paperCount: number): number {
   return Math.min(
     SYNTHESIS_BASE_TOKENS + paperCount * SYNTHESIS_TOKENS_PER_PAPER,
@@ -39,7 +39,7 @@ function synthesisMaxTokens(paperCount: number): number {
   );
 }
 
-// Extended thinking is left OFF on the synthesis call. Opus 4.6 adaptive
+// Extended thinking is left OFF on the synthesis call. Opus adaptive
 // thinking draws from the same max_tokens budget as the JSON output and chooses
 // its own depth, which makes an untruncated, parseable JSON harder to
 // guarantee. Correctness (a complete synthesis) is the priority here, so we
@@ -51,11 +51,11 @@ function synthesisMaxTokens(paperCount: number): number {
 // (synthesize sub-clusters, then synthesize their summaries). Not built here;
 // flagged as the next scaling step.
 
-// Narration is descriptive writing grounded in the already-computed relations,
-// not the hard cross-paper judgment Opus already did, so Sonnet is enough and
-// cheaper. Its single-call output (one entry per paper) also grows with paper
-// count, so scale its budget too, capped well under Sonnet 4.6's 64k ceiling.
-const NARRATION_MODEL = "claude-sonnet-4-6";
+// Narration is descriptive writing grounded in the already-computed relations.
+// It is classed as judgment work and shares the judgment model. Its single-call
+// output (one entry per paper) grows with paper count, so scale its budget too;
+// the cap sits well under the Opus 4.8 output ceiling.
+const NARRATION_MODEL = MODELS.judgment;
 const NARRATION_BASE_TOKENS = 2_000;
 const NARRATION_TOKENS_PER_PAPER = 400;
 const NARRATION_MAX_OUTPUT_CAP = 16_000;

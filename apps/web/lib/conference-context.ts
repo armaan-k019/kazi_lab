@@ -1,13 +1,14 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { eq } from "drizzle-orm";
-import { db, libraryConferences } from "@kazi-lab/db";
+import { db, libraryConferences, MODELS } from "@kazi-lab/db";
 import { fetchSource } from "@kazi-lab/scribe";
 
-// Conference context is a cheap structuring task, so it uses Sonnet. HARD
-// BOUNDARY: this only ever writes to library_conferences. The fetched/pasted
-// source text is NEVER inserted into papers/extractions/claims/embeddings and
-// never enters Scribe synthesis. It is venue context only.
-const MODEL = "claude-sonnet-4-6";
+// Conference context is a structuring task; it uses the shared extraction model
+// (now Opus 4.8, moved off Sonnet by choice). HARD BOUNDARY: this only ever
+// writes to library_conferences. The fetched/pasted source text is NEVER
+// inserted into papers/extractions/claims/embeddings and never enters Scribe
+// synthesis. It is venue context only.
+const MODEL = MODELS.extraction;
 const MAX_TOKENS = 1500;
 const SOURCE_CAP = 40_000;
 

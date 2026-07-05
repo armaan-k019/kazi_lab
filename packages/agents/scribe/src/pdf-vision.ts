@@ -10,13 +10,15 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import Anthropic from "@anthropic-ai/sdk";
+import { MODELS } from "@kazi-lab/db";
 import { countMarkdownTables } from "./markdown";
 import { STORED_TEXT_CAP } from "./types";
 
-// Vision transcription is descriptive structuring (read text + render tables),
-// so it uses Sonnet. Rasterization runs in an isolated child process so a
-// native pdfjs/canvas crash skips the paper instead of aborting the run.
-const MODEL = "claude-sonnet-4-6";
+// Vision transcription is descriptive structuring (read text + render tables).
+// It uses the shared extraction model (now Opus 4.8, moved off Sonnet by
+// choice). Rasterization runs in an isolated child process so a native
+// pdfjs/canvas crash skips the paper instead of aborting the run.
+const MODEL = MODELS.extraction;
 const MAX_VISION_PAGES = 12; // bound cost; covers most papers' main body
 const MAX_TOKENS = 8000;
 const RENDER_SCALE = 2.0; // legible table cells

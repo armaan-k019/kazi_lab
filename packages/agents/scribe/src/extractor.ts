@@ -1,11 +1,14 @@
 import Anthropic from "@anthropic-ai/sdk";
+import { MODELS } from "@kazi-lab/db";
 import { RAW_TEXT_CAP, type SourcePaperData } from "./types";
 
 // Bump this whenever the extraction prompt below changes, so stored extractions
 // record which prompt produced them.
 export const EXTRACTION_VERSION = "v3-2026-06-08";
 
-const MODEL = "claude-sonnet-4-6";
+// Claim + metadata extraction is structured reading of one paper. It uses the
+// shared extraction model (now Opus 4.8, moved off Sonnet by choice).
+const MODEL = MODELS.extraction;
 const MAX_TOKENS = 4096;
 
 export type InferredMetadata = {

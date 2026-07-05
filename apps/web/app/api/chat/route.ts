@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
 import { eq } from "drizzle-orm";
-import { db, libraries } from "@kazi-lab/db";
+import { db, libraries, MODELS } from "@kazi-lab/db";
 import { retrieveRelevant } from "@kazi-lab/scribe";
 
 export const runtime = "nodejs";
@@ -13,7 +13,8 @@ export const dynamic = "force-dynamic";
 // knowledge. This is the core of the grounding contract.
 const SIMILARITY_FLOOR = 0.45;
 const RETRIEVE_LIMIT = 12;
-const MODEL = "claude-sonnet-4-6";
+// The interactive research chat assistant uses the shared chat model (Opus 4.8).
+const MODEL = MODELS.chat;
 const MAX_TOKENS = 1024;
 const MAX_HISTORY = 6;
 

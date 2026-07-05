@@ -12,19 +12,21 @@ import {
   findingVerdicts,
   libraries,
   libraryConferences,
+  MODELS,
   paperLibraries,
   papers,
   synthesisRuns,
 } from "@kazi-lab/db";
 
 // The Critic audits synthesis output, which is judgment-heavy adversarial
-// reasoning, so it uses Opus (same model and call conventions as synthesis).
-const MODEL = "claude-opus-4-6";
+// reasoning, so it uses the shared judgment model (same model and call
+// conventions as synthesis).
+const MODEL = MODELS.judgment;
 
 // Output budget scales with the number of audited items (contradictions +
 // findings). Each verdict is small (a few fields plus a 1-2 sentence
-// rationale), so a modest per-item increment over a base is plenty; capped well
-// under Opus 4.6's 128k output ceiling. The truncation guard is the backstop.
+// rationale), so a modest per-item increment over a base is plenty; the cap
+// sits well under the Opus 4.8 output ceiling. The truncation guard is the backstop.
 //   maxTokens = min(BASE + perItem * itemCount, CAP)
 const BASE_TOKENS = 6_000;
 const TOKENS_PER_ITEM = 700;

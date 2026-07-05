@@ -1,11 +1,11 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { eq } from "drizzle-orm";
-import { db, paperMetrics, papers } from "@kazi-lab/db";
+import { db, MODELS, paperMetrics, papers } from "@kazi-lab/db";
 import { canonDataset, canonMetric, canonTask } from "./metric-aliases";
 
-// Metric extraction is structured reading of the (table-bearing) text, not the
-// hard cross-paper judgment Opus does, so Sonnet is enough.
-const MODEL = "claude-sonnet-4-6";
+// Metric extraction is structured reading of the (table-bearing) text. It uses
+// the shared extraction model (now Opus 4.8, moved off Sonnet by choice).
+const MODEL = MODELS.extraction;
 export const METRIC_EXTRACTION_VERSION = "metrics-v1-2026-06-23";
 
 // Read the FULL table-bearing stored text (not the 40k claim-extraction slice
@@ -13,11 +13,12 @@ export const METRIC_EXTRACTION_VERSION = "metrics-v1-2026-06-23";
 const TEXT_CAP = 150_000;
 
 // Output budget scales with text length (more text -> more tables/rows). Set
-// generously (rows carry a source_excerpt, so JSON is verbose) but under Sonnet
-// 4.6's 64k output limit. The truncation guard is the backstop.
+// generously (rows carry a source_excerpt, so JSON is verbose); the cap is a
+// backstop that sits under the Opus 4.8 output ceiling. The truncation guard
+// is the last line of defense.
 const BASE_TOKENS = 12_000;
 const TOKENS_PER_KCHAR = 320; // large (150k-char) papers should reach the cap
-const MAX_OUTPUT_CAP = 60_000; // under Sonnet 4.6's 64k output limit
+const MAX_OUTPUT_CAP = 60_000; // backstop, well under Opus 4.8's output ceiling
 function metricMaxTokens(textLen: number): number {
   return Math.min(
     MAX_OUTPUT_CAP,
