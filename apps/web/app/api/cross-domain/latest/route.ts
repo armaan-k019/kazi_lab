@@ -1,12 +1,14 @@
 import { NextResponse } from "next/server";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import {
+  crossDomainCriticRuns,
   crossDomainLinkEvidence,
   crossDomainLinks,
   crossDomainRuns,
   db,
   isAllPapersLibrary,
   libraries,
+  linkVerdicts,
   synthesisRuns,
 } from "@kazi-lab/db";
 
@@ -70,13 +72,54 @@ export async function GET() {
       evByLink.set(e.linkId, arr);
     }
 
+    // Latest cross-domain critique of this run + its verdicts, keyed by link.
+    const [critique] = await db
+      .select({
+        id: crossDomainCriticRuns.id,
+        notes: crossDomainCriticRuns.notes,
+        completedAt: crossDomainCriticRuns.completedAt,
+      })
+      .from(crossDomainCriticRuns)
+      .where(
+        and(
+          eq(crossDomainCriticRuns.crossDomainRunId, run.id),
+          eq(crossDomainCriticRuns.status, "completed"),
+        ),
+      )
+      .orderBy(desc(crossDomainCriticRuns.completedAt))
+      .limit(1);
+    const verdictByLink = new Map<
+      string,
+      { verdict: string; rationale: string | null; confidence: string | null }
+    >();
+    if (critique) {
+      const vRows = await db
+        .select({
+          linkId: linkVerdicts.linkId,
+          verdict: linkVerdicts.verdict,
+          rationale: linkVerdicts.rationale,
+          confidence: linkVerdicts.confidence,
+        })
+        .from(linkVerdicts)
+        .where(eq(linkVerdicts.criticRunId, critique.id));
+      for (const v of vRows) {
+        verdictByLink.set(v.linkId, {
+          verdict: v.verdict,
+          rationale: v.rationale,
+          confidence: v.confidence,
+        });
+      }
+    }
+
     const links = linkRows.map((l) => ({
       id: l.id,
       level: l.level,
       summary: l.summary,
       confidence: l.confidence,
       isCandidate: l.isCandidate,
+      source: l.source,
       rationale: l.rationale,
+      verdict: verdictByLink.get(l.id) ?? null,
       libraries: l.libraryIds.map((id) => ({ id, name: libName.get(id) ?? "unknown" })),
       evidence: (evByLink.get(l.id) ?? []).map((e) => ({
         id: e.id,
@@ -96,6 +139,9 @@ export async function GET() {
         createdAt: run.createdAt,
         completedAt: run.completedAt,
       },
+      critique: critique
+        ? { id: critique.id, notes: critique.notes, completedAt: critique.completedAt }
+        : null,
       links,
     });
   } catch (error) {

@@ -280,13 +280,18 @@ export type CrossDomainEvidence = {
   excerpt: string | null;
 };
 
+export type CrossDomainVerdict = "confirmed" | "promoted" | "demoted" | "rejected";
+
 export type CrossDomainLink = {
   id: string;
   level: CrossDomainLevel;
   summary: string;
   confidence: string | null;
   isCandidate: boolean;
+  source: "synthesis" | "discovery";
   rationale: string | null;
+  // The cross-domain Critic's verdict on this link, if the run was critiqued.
+  verdict: { verdict: CrossDomainVerdict; rationale: string | null; confidence: string | null } | null;
   libraries: { id: string; name: string }[];
   evidence: CrossDomainEvidence[];
 };
@@ -300,5 +305,6 @@ export type CrossDomainLatest = {
     createdAt: string;
     completedAt: string | null;
   } | null;
+  critique: { id: string; notes: string | null; completedAt: string | null } | null;
   links: CrossDomainLink[];
 };

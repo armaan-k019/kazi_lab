@@ -35,6 +35,7 @@ export function CrossDomainView() {
   const [data, setData] = useState<CrossDomainLatest | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
+  const [critiquing, setCritiquing] = useState(false);
 
   const load = useCallback(() => {
     setError(null);
@@ -69,6 +70,26 @@ export function CrossDomainView() {
       setError((e as Error).message);
     } finally {
       setRunning(false);
+    }
+  };
+
+  const critique = async () => {
+    if (critiquing || !data?.run) return;
+    setCritiquing(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/cross-domain/critique", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error ?? "The cross-domain critique could not complete.");
+      load();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setCritiquing(false);
     }
   };
 
@@ -112,20 +133,37 @@ export function CrossDomainView() {
             <button
               type="button"
               onClick={run}
-              disabled={running}
+              disabled={running || critiquing}
               className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:cursor-default disabled:opacity-50"
             >
               {data.run ? "Re-run cross-domain synthesis" : "Run cross-domain synthesis"}
             </button>
+            {data.run && (
+              <button
+                type="button"
+                onClick={critique}
+                disabled={running || critiquing}
+                className="rounded-lg border border-border px-4 py-2 text-sm font-medium text-text-secondary transition-colors hover:border-accent/40 hover:text-accent disabled:cursor-default disabled:opacity-50"
+              >
+                {data.critique ? "Re-run cross-domain critique" : "Run cross-domain critique"}
+              </button>
+            )}
             {running && (
               <span className="flex items-center gap-2 text-[13px] text-text-secondary">
                 <Spinner /> reasoning across {eligibleCount} projects, this takes a minute…
               </span>
             )}
-            {!running && data.run && (
+            {critiquing && (
+              <span className="flex items-center gap-2 text-[13px] text-text-secondary">
+                <Spinner /> the skeptic is attacking each link and scanning for missed ones…
+              </span>
+            )}
+            {!running && !critiquing && data.run && (
               <span className="text-[13px] text-text-muted">
-                Last run {formatRelativeTime(data.run.completedAt)} · over{" "}
+                Last synthesis {formatRelativeTime(data.run.completedAt)} · over{" "}
                 {data.run.scope.join(", ")}
+                {data.critique &&
+                  ` · critiqued ${formatRelativeTime(data.critique.completedAt)}`}
               </span>
             )}
           </div>
@@ -185,13 +223,26 @@ export function CrossDomainView() {
   );
 }
 
+const FLAG = "#b4493b"; // struck / rejected
+// Verdict presentation: confirmed/promoted read calm positive, demoted amber,
+// rejected clearly struck. null = not yet critiqued.
+function verdictStyle(v: string): { color: string; label: string } {
+  if (v === "confirmed") return { color: ACCENT, label: "confirmed" };
+  if (v === "promoted") return { color: ACCENT, label: "promoted to grounded" };
+  if (v === "demoted") return { color: CANDIDATE, label: "demoted to candidate" };
+  return { color: FLAG, label: "rejected" };
+}
+
 function LinkCard({ link }: { link: CrossDomainLink }) {
+  const rejected = link.verdict?.verdict === "rejected";
   const accent = link.isCandidate ? CANDIDATE : ACCENT;
+  const borderColor = rejected
+    ? "color-mix(in srgb, #b4493b 35%, transparent)"
+    : link.isCandidate
+      ? "color-mix(in srgb, #b07a4f 35%, transparent)"
+      : "var(--border)";
   return (
-    <div
-      className="rounded-xl border bg-surface p-4"
-      style={{ borderColor: link.isCandidate ? "color-mix(in srgb, #b07a4f 35%, transparent)" : "var(--border)" }}
-    >
+    <div className="rounded-xl border bg-surface p-4" style={{ borderColor }}>
       <div className="flex flex-wrap items-center gap-2">
         <span
           className="rounded-full px-2 py-0.5 text-[11px] font-medium"
@@ -199,6 +250,26 @@ function LinkCard({ link }: { link: CrossDomainLink }) {
         >
           {link.isCandidate ? "candidate · needs pressure-testing" : "grounded"}
         </span>
+        {link.source === "discovery" && (
+          <span
+            className="rounded-full px-2 py-0.5 text-[11px] font-medium"
+            style={{ color: CANDIDATE, backgroundColor: "var(--surface-raised)" }}
+          >
+            discovered · needs validation
+          </span>
+        )}
+        {link.verdict && (
+          <span
+            className="rounded-full px-2 py-0.5 text-[11px] font-semibold"
+            style={{
+              color: verdictStyle(link.verdict.verdict).color,
+              backgroundColor: "var(--surface-raised)",
+            }}
+          >
+            critic: {verdictStyle(link.verdict.verdict).label}
+            {link.verdict.confidence ? ` (${link.verdict.confidence})` : ""}
+          </span>
+        )}
         {link.confidence && (
           <span className="text-[12px] text-text-muted">{link.confidence} confidence</span>
         )}
@@ -214,13 +285,32 @@ function LinkCard({ link }: { link: CrossDomainLink }) {
         </span>
       </div>
 
-      <p className="mt-3 text-[14px] font-medium leading-snug text-text-primary">
+      <p
+        className="mt-3 text-[14px] font-medium leading-snug"
+        style={{
+          color: rejected ? "var(--text-muted)" : "var(--text-primary)",
+          textDecoration: rejected ? "line-through" : "none",
+        }}
+      >
         {link.summary}
       </p>
       {link.rationale && (
         <p className="mt-1.5 text-[13px] leading-relaxed text-text-secondary">
           {link.rationale}
         </p>
+      )}
+      {link.verdict?.rationale && (
+        <div
+          className="mt-2.5 rounded-lg border-l-2 pl-3 py-1"
+          style={{ borderColor: verdictStyle(link.verdict.verdict).color }}
+        >
+          <p className="text-[11px] font-medium uppercase tracking-wide text-text-muted">
+            Skeptic&rsquo;s verdict
+          </p>
+          <p className="mt-1 text-[13px] leading-relaxed text-text-primary">
+            {link.verdict.rationale}
+          </p>
+        </div>
       )}
 
       {link.evidence.length > 0 && (

@@ -19,6 +19,7 @@ import {
   synthesisRuns,
   themes,
 } from "@kazi-lab/db";
+import { extractJsonObject } from "./json";
 
 // Cross-domain synthesis is hard judgment across multiple domains (is this the
 // SAME thing or just the same word?), so it uses the shared judgment model, the
@@ -41,9 +42,9 @@ const MAX_FINDINGS = 50;
 const MAX_METHODS = 60;
 const MAX_QUESTIONS = 20;
 
-const LEVELS = ["method", "claim", "concept"] as const;
-const KINDS = ["method", "finding", "claim"] as const;
-const CONFIDENCES = ["low", "medium", "high"] as const;
+export const LEVELS = ["method", "claim", "concept"] as const;
+export const KINDS = ["method", "finding", "claim"] as const;
+export const CONFIDENCES = ["low", "medium", "high"] as const;
 
 const SYSTEM_PROMPT = `You are the lab-level CROSS-DOMAIN SYNTHESIZER for kazi-lab, a research lab holding several independent projects (libraries). Each library has already been synthesized (themes, findings with strength labels, open questions) and most have been audited by a Critic. You read ACROSS libraries and surface what GENUINELY RECURS across domains, grounded in concrete evidence. You do NOT re-synthesize a single library and you do NOT pressure-test your own output (a separate cross-domain Critic does that next).
 
@@ -96,9 +97,9 @@ type RawLink = {
 type RawOutput = { links?: RawLink[]; honest_read?: unknown };
 
 // Audit status of a finding for claim-level grounding.
-type AuditStatus = "sound" | "flagged" | "unaudited";
+export type AuditStatus = "sound" | "flagged" | "unaudited";
 
-type LibraryAssembly = {
+export type LibraryAssembly = {
   id: string;
   name: string;
   synthesisRunId: string;
@@ -136,28 +137,46 @@ export type CrossDomainResult =
     }
   | { status: "failed"; runId: string; error: string };
 
-function stripJsonFence(text: string): string {
-  const trimmed = text.trim();
-  const fenced = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/);
-  return fenced ? fenced[1].trim() : trimmed;
-}
-function oneOf<T extends readonly string[]>(value: unknown, allowed: T): T[number] | null {
+export function oneOf<T extends readonly string[]>(value: unknown, allowed: T): T[number] | null {
   return typeof value === "string" && (allowed as readonly string[]).includes(value)
     ? (value as T[number])
     : null;
 }
-function str(v: unknown): string | null {
+export function str(v: unknown): string | null {
   return typeof v === "string" && v.trim().length > 0 ? v.trim() : null;
 }
-function normalize(s: string): string {
+export function normalize(s: string): string {
   return s.toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+// The single evidence-resolution check, shared by cross-domain synthesis and the
+// cross-domain Critic's discovery pass so both ground links against the real
+// assembled data identically. A ref is valid only if it resolves to a real
+// thing in the named library: a method named in the inventory or grounded
+// corpus, a real finding id, or a real claim id. For findings it also returns
+// the Critic audit status so callers can downgrade links resting on flagged or
+// unaudited findings.
+export function resolveEvidenceRef(
+  a: LibraryAssembly,
+  kind: (typeof KINDS)[number],
+  ref: string,
+): { valid: boolean; audit: AuditStatus | null } {
+  if (kind === "method") {
+    const n = normalize(ref);
+    return { valid: n.length >= 3 && a.corpus.includes(n), audit: null };
+  }
+  if (kind === "finding") {
+    const valid = a.findingIds.has(ref);
+    return { valid, audit: valid ? (a.findingAudit.get(ref) ?? "unaudited") : null };
+  }
+  return { valid: a.claimIds.has(ref), audit: null };
 }
 
 // Assemble the cross-domain inputs for one eligible library: its latest
 // synthesis (themes, findings, open questions), the Critic verdicts on those
 // findings (to prefer audited-sound), and its method inventory + a validation
 // corpus. Returns null if the library has no completed synthesis (caller skips).
-async function assembleLibrary(lib: {
+export async function assembleLibrary(lib: {
   id: string;
   name: string;
 }): Promise<LibraryAssembly | null> {
@@ -281,7 +300,7 @@ async function assembleLibrary(lib: {
   };
 }
 
-function libraryDoc(a: LibraryAssembly): string {
+export function libraryDoc(a: LibraryAssembly): string {
   const themeLine = a.themes.length
     ? a.themes.map((t) => `- ${t.name}${t.description ? `: ${t.description}` : ""}`).join("\n")
     : "(none)";
@@ -394,7 +413,7 @@ ${assemblies.map(libraryDoc).join("\n\n")}`;
 
     let parsed: RawOutput;
     try {
-      parsed = JSON.parse(stripJsonFence(raw)) as RawOutput;
+      parsed = JSON.parse(extractJsonObject(raw)) as RawOutput;
     } catch (parseErr) {
       if (truncated) {
         throw new Error(
@@ -447,21 +466,10 @@ ${assemblies.map(libraryDoc).join("\n\n")}`;
           continue;
         }
         // id/name validation guard: the ref must resolve to a real thing.
-        let valid = false;
-        if (kind === "method") {
-          // a method named in the inventory or anywhere in the grounded corpus.
-          const n = normalize(ref);
-          valid = n.length >= 3 && a.corpus.includes(n);
-        } else if (kind === "finding") {
-          valid = a.findingIds.has(ref);
-          if (valid) {
-            const status = a.findingAudit.get(ref) ?? "unaudited";
-            if (status === "flagged") restsOnFlagged = true;
-            if (status === "unaudited") restsOnUnaudited = true;
-          }
-        } else {
-          valid = a.claimIds.has(ref);
-        }
+        // Shared with the Critic's discovery pass (resolveEvidenceRef).
+        const { valid, audit } = resolveEvidenceRef(a, kind, ref);
+        if (audit === "flagged") restsOnFlagged = true;
+        if (audit === "unaudited") restsOnUnaudited = true;
         if (!valid) {
           droppedEvidence++;
           continue;

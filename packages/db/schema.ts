@@ -588,6 +588,10 @@ export const crossDomainLinks = pgTable(
     libraryIds: uuid("library_ids").array().notNull().default(sql`'{}'::uuid[]`),
     confidence: text("confidence"), // low | medium | high
     isCandidate: boolean("is_candidate").notNull().default(false),
+    // How this link entered the run: "synthesis" = the cross-domain synthesizer
+    // proposed it; "discovery" = the cross-domain Critic's discovery pass found
+    // it (always a candidate). Both live under the same cross_domain_run_id.
+    source: text("source").notNull().default("synthesis"), // synthesis | discovery
     rationale: text("rationale"),
     createdAt: timestamp("created_at").notNull().defaultNow(),
   },
@@ -624,3 +628,51 @@ export type CrossDomainLinkEvidence =
   typeof crossDomainLinkEvidence.$inferSelect;
 export type NewCrossDomainLinkEvidence =
   typeof crossDomainLinkEvidence.$inferInsert;
+
+// The cross-domain Critic: an adversarial audit of ONE cross-domain run. It
+// validates the run's links (skeptical pass) and discovers missed connections
+// (conservative pass). One critic run audits one cross-domain run.
+export const crossDomainCriticRuns = pgTable("cross_domain_critic_runs", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  crossDomainRunId: uuid("cross_domain_run_id")
+    .notNull()
+    .references(() => crossDomainRuns.id, { onDelete: "cascade" }),
+  model: text("model"),
+  status: text("status").notNull().default("running"), // running | completed | failed
+  notes: text("notes"),
+  error: text("error"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  completedAt: timestamp("completed_at"),
+});
+
+// One skeptical verdict on one cross-domain link. verdict:
+//   confirmed = a grounded link that survived the attack.
+//   promoted  = a candidate whose evidence holds; it earns grounded status.
+//   demoted   = a grounded link whose evidence does not withstand attack;
+//               it becomes a candidate.
+//   rejected  = superficial / vocabulary coincidence; not a real recurrence.
+// The verdict is an audit record; it does not mutate the link row (provenance).
+export const linkVerdicts = pgTable(
+  "link_verdicts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    criticRunId: uuid("critic_run_id")
+      .notNull()
+      .references(() => crossDomainCriticRuns.id, { onDelete: "cascade" }),
+    linkId: uuid("link_id")
+      .notNull()
+      .references(() => crossDomainLinks.id, { onDelete: "cascade" }),
+    verdict: text("verdict").notNull(), // confirmed | promoted | demoted | rejected
+    rationale: text("rationale"), // the skeptic's reasoning, grounded in the evidence
+    confidence: text("confidence"), // low | medium | high
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (table) => [
+    index("link_verdicts_run_idx").on(table.criticRunId),
+  ],
+);
+
+export type CrossDomainCriticRun = typeof crossDomainCriticRuns.$inferSelect;
+export type NewCrossDomainCriticRun = typeof crossDomainCriticRuns.$inferInsert;
+export type LinkVerdict = typeof linkVerdicts.$inferSelect;
+export type NewLinkVerdict = typeof linkVerdicts.$inferInsert;

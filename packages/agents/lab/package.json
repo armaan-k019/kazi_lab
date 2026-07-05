@@ -7,7 +7,8 @@
     ".": "./src/index.ts"
   },
   "scripts": {
-    "cross-domain": "tsx src/cross-domain-cli.ts"
+    "cross-domain": "tsx src/cross-domain-cli.ts",
+    "cross-domain-critique": "tsx src/cross-domain-critic-cli.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.102.0",
