@@ -15,6 +15,7 @@
     "@kazi-lab/experimentalist": "workspace:*",
     "@kazi-lab/lab": "workspace:*",
     "@kazi-lab/scribe": "workspace:*",
+    "@kazi-lab/writer": "workspace:*",
     "d3-force": "^3.0.0",
     "d3-selection": "^3.0.0",
     "d3-zoom": "^3.0.0",

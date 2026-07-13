@@ -8,6 +8,7 @@ import { ScribeView } from "@/components/scribe/scribe-view";
 import { CriticView } from "@/components/critic/critic-view";
 import { CrossDomainView } from "@/components/cross-domain/cross-domain-view";
 import { ExperimentalistView } from "@/components/experimentalist/experimentalist-view";
+import { WriterView } from "@/components/writer/writer-view";
 import { DormantView } from "@/components/dormant-view";
 import { AGENTS, type ViewId } from "@/lib/agents";
 
@@ -37,6 +38,8 @@ export default function Home() {
               <CrossDomainView />
             ) : active === "experimentalist" ? (
               <ExperimentalistView />
+            ) : active === "writer" ? (
+              <WriterView />
             ) : agent ? (
               <DormantView agent={agent} />
             ) : null}

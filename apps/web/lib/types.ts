@@ -385,3 +385,21 @@ export type ExperimentRun = {
   qualitative?: { libraryName: string; findings: { findingRef: string | null; excerpt: string | null; note: string | null }[] }[];
   spec?: ExperimentSpecView | null;
 };
+
+// Writer (shapes from /api/writer/*).
+export type DocumentSection = { key: string; heading: string; body: string; kind: string };
+export type WriterDocument = {
+  writerRunId: string;
+  experimentalistRunId: string;
+  claim: string | null;
+  title: string | null;
+  sections: DocumentSection[];
+  provenance: Record<string, string[]> | null;
+  conferencesConsidered: string[] | null;
+  notes: string | null;
+  completedAt: string | null;
+};
+export type WriterLatest = {
+  experimentalistRuns: { id: string; claim: string; completedAt: string | null; hasDocument: boolean }[];
+  document: WriterDocument | null;
+};

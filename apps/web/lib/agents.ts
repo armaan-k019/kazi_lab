@@ -22,5 +22,5 @@ export const AGENTS: Agent[] = [
     role: "experiments",
     active: true,
   },
-  { id: "writer", name: "Writer", role: "synthesis", active: false },
+  { id: "writer", name: "Writer", role: "synthesis", active: true },
 ];

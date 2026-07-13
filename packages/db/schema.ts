@@ -778,3 +778,49 @@ export type QualitativeEvidence = typeof qualitativeEvidence.$inferSelect;
 export type NewQualitativeEvidence = typeof qualitativeEvidence.$inferInsert;
 export type ExperimentSpec = typeof experimentSpecs.$inferSelect;
 export type NewExperimentSpec = typeof experimentSpecs.$inferInsert;
+
+// ---------------------------------------------------------------------------
+// Writer: documents one research thread end to end as a structured research
+// write-up. It is a DOCUMENTARIAN, not an author: every substantive statement
+// traces to something that already exists (an audited-sound finding, a computed
+// meta_analyses row, the stored interpretation/spec, a Critic verdict, a
+// cross-domain link + verdict). No new numbers, findings, or claims. A run is an
+// immutable snapshot. A future execution-results mode is additive (the results
+// section is currently an honest placeholder).
+// ---------------------------------------------------------------------------
+
+export const writerRuns = pgTable("writer_runs", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  experimentalistRunId: uuid("experimentalist_run_id")
+    .notNull()
+    .references(() => experimentalistRuns.id, { onDelete: "cascade" }),
+  model: text("model"),
+  status: text("status").notNull().default("running"), // running | completed | failed
+  notes: text("notes"),
+  error: text("error"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  completedAt: timestamp("completed_at"),
+});
+
+// The generated research document (one per writer run). sections is the ordered
+// list of fixed sections, each { key, heading, body, kind }. provenance maps each
+// section key to the finding / meta_analyses / spec / verdict / link ids it rests
+// on, so every section is auditable back to real upstream data.
+export const researchDocuments = pgTable("research_documents", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  writerRunId: uuid("writer_run_id")
+    .notNull()
+    .references(() => writerRuns.id, { onDelete: "cascade" }),
+  title: text("title"),
+  sections: jsonb("sections").notNull(), // [{ key, heading, body, kind }]
+  provenance: jsonb("provenance"), // { [sectionKey]: string[] } of resolved ref ids
+  conferencesConsidered: text("conferences_considered")
+    .array()
+    .default(sql`'{}'::text[]`),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export type WriterRun = typeof writerRuns.$inferSelect;
+export type NewWriterRun = typeof writerRuns.$inferInsert;
+export type ResearchDocument = typeof researchDocuments.$inferSelect;
+export type NewResearchDocument = typeof researchDocuments.$inferInsert;

@@ -227,6 +227,9 @@ importers:
       '@kazi-lab/scribe':
         specifier: workspace:*
         version: link:../../packages/agents/scribe
+      '@kazi-lab/writer':
+        specifier: workspace:*
+        version: link:../../packages/agents/writer
       d3-force:
         specifier: ^3.0.0
         version: 3.0.0
@@ -394,6 +397,28 @@ importers:
       '@types/turndown':
         specifier: ^5.0.6
         version: 5.0.6
+      tsx:
+        specifier: ^4.22.4
+        version: 4.22.4
+
+  packages/agents/writer:
+    dependencies:
+      '@anthropic-ai/sdk':
+        specifier: ^0.102.0
+        version: 0.102.0(zod@4.4.3)
+      '@kazi-lab/db':
+        specifier: workspace:*
+        version: link:../../db
+      '@kazi-lab/lab':
+        specifier: workspace:*
+        version: link:../lab
+      dotenv:
+        specifier: ^17.4.2
+        version: 17.4.2
+      drizzle-orm:
+        specifier: ^0.45.2
+        version: 0.45.2(@types/pg@8.20.0)(pg@8.21.0)
+    devDependencies:
       tsx:
         specifier: ^4.22.4
         version: 4.22.4
