@@ -33,6 +33,81 @@ dashes anywhere.
 
 ## Decisions
 
+### 2026-07-23 Crossover proposal pipeline hardened; root cause was API credit exhaustion
+Decision: rebuild proposeCrossovers as an explicitly staged pipeline (select_run,
+candidates, grounding_prep, proposer_llm, grounding, persist, auto_critique), each
+stage individually guarded, with a diagnostics object returned on every outcome
+(completed, nothing, failed) and rendered in a Discovery diagnostics panel.
+Reasoning: the "Propose crossovers" failure was diagnosed by direct CLI
+reproduction before any code change. The verbatim root cause: the Anthropic API
+returned 400 "Your credit balance is too low to access the Anthropic API" at the
+proposer LLM call. The route then swallowed it into a generic message. The bug to
+fix was opacity, not the billing state: nothing in the pipeline recorded which
+stage failed or why. Additional latent issue fixed: no short-circuit existed for
+the degenerate case where no candidate has 2+ groundable evidence papers, which
+would have burned an LLM call to produce guaranteed-dropped proposals (on the
+current corpus only 4/14 candidates are viable; 3 synthesized libraries).
+Consequences: empty and degenerate inputs short-circuit honestly WITHOUT an LLM
+call; the proposer LLM failure surfaces its real error and stage in the UI;
+ConceptNet grounding is best-effort (5s timeout, one retry, records unavailable
+and proceeds at low confidence, never blocks); resolveEvidenceRef is guarded so a
+throw becomes a droppable result; auto-critique only runs with 1+ links and its
+failure never loses persisted proposals; per-service statuses (ConceptNet,
+Datamuse, Crossref, Semantic Scholar) are probed informationally and ConceptNet's
+is overridden by actual usage. Proposals still require API credits to run; the
+pipeline now says so in plain text instead of failing opaquely. Diagnostics are
+returned per-response and rendered client-side, not persisted (no migration; a
+zero-proposal run creates no row to attach them to, and the run-level outcome is
+already recorded on cross_domain_runs when links persist).
+
+### 2026-07-23 Projection parameters chosen by computed silhouette, not by eye
+Decision: build-web now sweeps t-SNE parameters (perplexity 10/20/30/45 clamped to
+the (n-1)/3 well-posedness cap, early exaggeration 4/12) and selects the setting
+maximizing the mean silhouette score of the Louvain communities in the 3D
+coordinates. The full sweep with metrics is stored in stats.projectionSweep and
+the chosen setting on the run's params (jsonb, no migration). Unit-tested
+(silhouette correctness, determinism, cap clamping); seeded reproducibility kept.
+Reasoning: the prior fixed default (perplexity 30, early exaggeration 12) produced
+visibly intermingled clusters. On the real 107-paper corpus the sweep measured:
+silhouette 0.2712 for the stored default coords versus 0.4155 for perplexity 10 +
+early exaggeration 4 (intra/inter distance ratio 0.5837 vs 0.4304). The choice is
+now evidence-based and auditable per run. UMAP was NOT added: no UMAP dependency
+exists in the repo, hand-rolling was ruled out by the prompt, and adding a
+marginally-maintained new library (umap-js) was not justified; tuned t-SNE stays.
+Consequences: the CURRENT stored run still has the old coordinates (rebuilding was
+deliberately skipped: community labels come from an LLM call that degrades to
+unlabeled without API credits, and losing the 5 real labels for a cosmetic-only
+rebuild was a bad trade). The next "Rebuild web" after credits are restored will
+self-tune, store the sweep, and re-label.
+
+### 2026-07-23 3D web rewritten as an instrument: additive sprites, staged edges, ego networks
+Decision: web-graph-3d.tsx rewritten. Points are soft additive-blended radial
+sprites (custom ShaderMaterial, size by influence with clamps, community-colored
+from a documented desaturated palette, manual FogExp2 in-shader). Edges default ON
+in two classes: intra-community (faint, community-hued, top-4 strongest per node)
+and inter-community bridges (brighter, warm, gentle bezier arcs), capped at 3000
+drawn edges selected by weight, plus a bridges-only toggle. Communities get
+billboarded centroid labels (CanvasTexture sprites that fade when the camera is
+near) and soft halo sprites at centroids scaled to member RMS extent. Interaction:
+damped orbit, idle auto-rotation (eases in after 5s, stops instantly on input),
+throttled raycast hover with tooltip (title, community, influence), click-to-ego-
+network with dimming and desaturation of non-members, shift-click or button to
+expand one hop, camera easing to selection, interactive legend (hover highlights,
+click isolates and frames), reset view, prefers-reduced-motion respected. Post:
+EffectComposer with subtle UnrealBloomPass (0.5/0.55/0.6) and a DOM vignette.
+Reasoning: the data already contained the structure; the render did not express
+it. The halo sprite was chosen over a convex hull because it is one draw call per
+community and reads clearly at this corpus size. Ego adjacency uses the DRAWN
+edge set so highlights always correspond to visible edges. A dev-only
+window.__measureWebGraph probe (guarded by NODE_ENV) measures synchronous render
+cost; measured 3.85 ms/frame with forced GPU flush at 107 nodes + 447 edges
+(about 260 FPS implied), so 500+ nodes has ample headroom.
+Consequences: pixel ratio capped at 2; all geometries, materials, textures,
+passes, composer, controls, listeners, and the RAF loop are disposed on unmount
+(verified: no WebGL context warnings across repeated HMR remounts); container
+resize handled via ResizeObserver. A .claude/launch.json was added so the app can
+be previewed by name; it is dev tooling, flagged for review.
+
 ### 2026-07-23 Execution notes and deviations (this prompt)
 Decision: build all non-destructive infrastructure first and defer the irreversible
 corpus reset + multi-hour reseed to a deliberate later step (the human chose this

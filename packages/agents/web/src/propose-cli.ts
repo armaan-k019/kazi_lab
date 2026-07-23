@@ -13,11 +13,24 @@ async function main(): Promise<void> {
   const { proposeCrossovers } = await import("./propose");
 
   const result = await proposeCrossovers(webRunId);
+
+  console.log("=== DIAGNOSTICS ===");
+  for (const s of result.diagnostics.stages) console.log(`  [${s.status}] ${s.stage}${s.note ? `: ${s.note}` : ""}`);
+  console.log(`  candidates considered: ${result.diagnostics.candidatesConsidered}`);
+  console.log(`  proposals from model: ${result.diagnostics.proposalsFromModel}`);
+  for (const d of result.diagnostics.dropped) console.log(`  dropped x${d.count}: ${d.reason}`);
+  for (const s of result.diagnostics.services) console.log(`  service ${s.service}: ${s.status} (${s.reason})`);
+  console.log(`  critique: ${result.diagnostics.critique}${result.diagnostics.critiqueNote ? ` (${result.diagnostics.critiqueNote})` : ""}`);
+
   if (result.status === "nothing") {
-    console.log("NOTHING:", result.reason);
+    console.log("\nNOTHING:", result.reason);
     process.exit(0);
   }
-  console.log("=== CROSSOVER PROPOSALS ===");
+  if (result.status === "failed") {
+    console.error(`\nFAILED at stage "${result.stage}": ${result.reason}`);
+    process.exit(1);
+  }
+  console.log("\n=== CROSSOVER PROPOSALS ===");
   console.log(`web run: ${result.webRunId}`);
   console.log(`cross_domain_run: ${result.crossDomainRunId ?? "(none created)"}`);
   console.log(`proposed: ${result.proposed} | dropped (no grounding): ${result.droppedNoGrounding}`);

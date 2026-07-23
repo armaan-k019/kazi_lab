@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { motion } from "framer-motion";
-import type { WebAbcCandidate, WebDiscovery, WebLatest } from "@/lib/types";
+import type { WebAbcCandidate, WebDiscovery, WebLatest, WebProposeDiagnostics, WebProposeOutcome } from "@/lib/types";
 import { formatRelativeTime } from "@/lib/format";
 import { WebGraph3D } from "./web-graph-3d";
 
@@ -13,12 +13,21 @@ function verdictColor(v: string | null): string {
   return "var(--text-muted)";
 }
 
+function serviceColor(status: string): string {
+  if (status === "ok") return "#6fb08a";
+  if (status === "degraded") return "#b07a4f";
+  if (status === "unavailable") return "#b4493b";
+  return "var(--text-muted)";
+}
+
 export function WebView() {
   const [data, setData] = useState<WebLatest | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [building, setBuilding] = useState(false);
   const [proposing, setProposing] = useState(false);
-  const [showEdges, setShowEdges] = useState(false);
+  // Outcome + diagnostics of the last proposal run this session. The pipeline
+  // records what happened at every stage; this panel makes it inspectable.
+  const [proposeOutcome, setProposeOutcome] = useState<WebProposeOutcome | null>(null);
 
   const load = useCallback(() => {
     setError(null);
@@ -31,18 +40,59 @@ export function WebView() {
     load();
   }, [load]);
 
-  const post = async (path: string, setBusy: (b: boolean) => void) => {
-    setBusy(true);
+  const rebuild = async () => {
+    setBuilding(true);
     setError(null);
     try {
-      const res = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) });
+      const res = await fetch("/api/web/build", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) });
       const b = await res.json();
-      if (!res.ok) throw new Error(b.error ?? "The operation could not complete.");
+      if (!res.ok) throw new Error(b.error ?? "The rebuild could not complete.");
       load();
     } catch (e) {
       setError((e as Error).message);
     } finally {
-      setBusy(false);
+      setBuilding(false);
+    }
+  };
+
+  const propose = async () => {
+    setProposing(true);
+    setError(null);
+    setProposeOutcome(null);
+    try {
+      const res = await fetch("/api/web/propose", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) });
+      const b = (await res.json()) as {
+        error?: string;
+        stage?: string;
+        diagnostics?: WebProposeDiagnostics;
+        status?: string;
+        proposed?: number;
+        note?: string | null;
+      };
+      if (!res.ok) {
+        setProposeOutcome({
+          kind: res.status === 422 ? "nothing" : "failed",
+          message: b.error ?? "The proposal run failed without a reason (this is itself a bug).",
+          stage: b.stage ?? null,
+          proposed: null,
+          note: null,
+          diagnostics: b.diagnostics ?? null,
+        });
+      } else {
+        setProposeOutcome({
+          kind: "completed",
+          message: b.proposed && b.proposed > 0 ? `${b.proposed} crossover proposal${b.proposed === 1 ? "" : "s"} persisted.` : b.note ?? "Completed with zero proposals.",
+          stage: null,
+          proposed: b.proposed ?? 0,
+          note: b.note ?? null,
+          diagnostics: b.diagnostics ?? null,
+        });
+        load();
+      }
+    } catch (e) {
+      setProposeOutcome({ kind: "failed", message: (e as Error).message, stage: null, proposed: null, note: null, diagnostics: null });
+    } finally {
+      setProposing(false);
     }
   };
 
@@ -59,22 +109,18 @@ export function WebView() {
       </p>
 
       <div className="mt-5 flex flex-wrap items-center gap-3">
-        <button type="button" onClick={() => post("/api/web/build", setBuilding)} disabled={building || proposing} className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:cursor-default disabled:opacity-50">
+        <button type="button" onClick={rebuild} disabled={building || proposing} className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:cursor-default disabled:opacity-50">
           {building ? "Rebuilding…" : "Rebuild web"}
         </button>
-        <button type="button" onClick={() => post("/api/web/propose", setProposing)} disabled={building || proposing || !data?.run} className="rounded-lg border border-border px-4 py-2 text-sm font-medium text-text-secondary transition-colors hover:border-accent/40 hover:text-accent disabled:cursor-default disabled:opacity-50">
+        <button type="button" onClick={propose} disabled={building || proposing || !data?.run} className="rounded-lg border border-border px-4 py-2 text-sm font-medium text-text-secondary transition-colors hover:border-accent/40 hover:text-accent disabled:cursor-default disabled:opacity-50">
           {proposing ? "Proposing…" : "Propose crossovers"}
         </button>
-        {data?.run && (
-          <label className="flex items-center gap-2 text-[12px] text-text-secondary">
-            <input type="checkbox" checked={showEdges} onChange={(e) => setShowEdges(e.target.checked)} /> edges
-          </label>
-        )}
         {(building || proposing) && <span className="flex items-center gap-2 text-[13px] text-text-secondary"><Spinner /> this takes a minute…</span>}
         {data?.run?.completedAt && !building && !proposing && <span className="text-[13px] text-text-muted">built {formatRelativeTime(data.run.completedAt)}</span>}
       </div>
 
       {error && <p className="mt-4 text-[13px] text-[#b4493b]">{error}</p>}
+      {proposeOutcome && <ProposeOutcomePanel outcome={proposeOutcome} />}
 
       {data && !data.run && (
         <p className="mt-8 max-w-md text-[15px] leading-relaxed text-text-muted">No web built yet. Rebuild the web to weave the corpus into a 3D graph.</p>
@@ -84,7 +130,7 @@ export function WebView() {
         <>
           <SanityStats data={data} />
           <div className="mt-6 rounded-xl border border-border bg-surface p-3">
-            <WebGraph3D nodes={data.nodes} edges={data.edges} communities={data.communities} showEdges={showEdges} onSelect={openPaper} />
+            <WebGraph3D nodes={data.nodes} edges={data.edges} communities={data.communities} onSelect={openPaper} />
           </div>
           <DiscoveriesPanel abc={data.abc} discoveries={data.discoveries} />
         </>
@@ -93,10 +139,87 @@ export function WebView() {
   );
 }
 
+// The last proposal run's outcome: the REAL reason and stage (never an opaque
+// message), plus the stage-by-stage diagnostics behind a "why" affordance.
+function ProposeOutcomePanel({ outcome }: { outcome: WebProposeOutcome }) {
+  const [showWhy, setShowWhy] = useState(false);
+  const tone = outcome.kind === "failed" ? "#b4493b" : outcome.kind === "nothing" ? "#b07a4f" : "var(--accent)";
+  return (
+    <div className="mt-4 rounded-xl border border-border bg-surface p-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="rounded-full px-2 py-0.5 text-[11px] font-medium" style={{ color: tone, backgroundColor: "var(--surface-raised)" }}>
+          {outcome.kind === "completed" ? "proposal run completed" : outcome.kind === "nothing" ? "nothing to propose" : `failed at stage: ${outcome.stage ?? "unknown"}`}
+        </span>
+        {outcome.diagnostics && (
+          <button type="button" onClick={() => setShowWhy((s) => !s)} className="text-[11px] text-text-muted underline-offset-2 hover:text-text-secondary hover:underline">
+            {showWhy ? "hide diagnostics" : "why?"}
+          </button>
+        )}
+      </div>
+      <p className="mt-2 text-[13px] leading-relaxed text-text-primary">{outcome.message}</p>
+      {outcome.note && outcome.note !== outcome.message && <p className="mt-1 text-[12px] text-text-secondary">{outcome.note}</p>}
+      {showWhy && outcome.diagnostics && <DiagnosticsPanel d={outcome.diagnostics} />}
+    </div>
+  );
+}
+
+// DISCOVERY DIAGNOSTICS: the proposal pipeline as an inspectable object, not a
+// black box. Candidates considered and dropped (with reasons), per-external-
+// service status, and whether the auto-critique ran.
+function DiagnosticsPanel({ d }: { d: WebProposeDiagnostics }) {
+  const stageTone = (s: string) => (s === "ok" ? "#6fb08a" : s === "failed" ? "#b4493b" : "#b07a4f");
+  return (
+    <div className="mt-3 space-y-3 border-t border-border pt-3">
+      <div>
+        <p className="text-[11px] font-medium uppercase tracking-wide text-text-muted">Pipeline stages</p>
+        <ul className="mt-1 space-y-0.5">
+          {d.stages.map((s, i) => (
+            <li key={i} className="font-mono text-[11px] text-text-secondary">
+              <span style={{ color: stageTone(s.status) }}>[{s.status}]</span> {s.stage}
+              {s.note && <span className="text-text-muted"> · {s.note}</span>}
+            </li>
+          ))}
+        </ul>
+      </div>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <div>
+          <p className="text-[11px] font-medium uppercase tracking-wide text-text-muted">Candidates</p>
+          <p className="mt-1 text-[12px] text-text-secondary">
+            {d.candidatesConsidered} considered · {d.proposalsFromModel} proposed by the model
+          </p>
+          {d.dropped.length > 0 && (
+            <ul className="mt-1 space-y-0.5">
+              {d.dropped.map((x, i) => (
+                <li key={i} className="text-[11px] leading-relaxed text-text-muted">x{x.count} {x.reason}</li>
+              ))}
+            </ul>
+          )}
+        </div>
+        <div>
+          <p className="text-[11px] font-medium uppercase tracking-wide text-text-muted">External services</p>
+          <ul className="mt-1 space-y-0.5">
+            {d.services.map((s, i) => (
+              <li key={i} className="text-[11px] text-text-secondary">
+                <span style={{ color: serviceColor(s.status) }}>{s.status}</span> {s.service}
+                <span className="text-text-muted"> · {s.reason}</span>
+              </li>
+            ))}
+          </ul>
+          <p className="mt-2 text-[11px] text-text-muted">
+            auto-critique: <span className="text-text-secondary">{d.critique}</span>
+            {d.critiqueNote && <span> · {d.critiqueNote}</span>}
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function SanityStats({ data }: { data: WebLatest }) {
   const s = data.run!.stats;
   const density = s.projectionDensity;
   const orphan = s.orphanReport;
+  const sweep = s.projectionSweep;
   return (
     <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-3">
       <Stat label="Nodes">
@@ -113,6 +236,12 @@ function SanityStats({ data }: { data: WebLatest }) {
       <Stat label="Projection density (IDF)">
         {density ? `${(density.beforeIdf * 100).toFixed(0)}% before, ${(density.afterIdf * 100).toFixed(0)}% after` : "-"}
         <span className="mt-1 block text-[11px] text-text-muted">Fraction of paper pairs linked. A drop means IDF fractured the previously dense projection.</span>
+      </Stat>
+      <Stat label="Projection params">
+        {sweep
+          ? `perplexity ${sweep.chosen.perplexity}, early exaggeration ${sweep.chosen.earlyExaggeration} (silhouette ${sweep.chosen.silhouette.toFixed(3)})`
+          : "defaults (no sweep recorded on this run; rebuild to tune)"}
+        <span className="mt-1 block text-[11px] text-text-muted">Chosen by computed silhouette of the Louvain communities in 3D, not by eye.</span>
       </Stat>
       <Stat label="Orphan report">
         {orphan ? `${orphan.tinyCommunities.length} tiny communities, ${orphan.lowDegreePapers.length} low-degree papers` : "-"}

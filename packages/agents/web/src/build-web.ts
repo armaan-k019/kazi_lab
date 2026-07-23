@@ -27,7 +27,7 @@ import {
   type WeightVector,
   type WeightedEdge,
 } from "./graph-algos";
-import { tsne } from "./tsne";
+import { selectProjection, type SweepEntry } from "./projection-select";
 
 const MODEL = MODELS.judgment;
 
@@ -447,9 +447,15 @@ export async function buildWeb(paramsIn?: Partial<WebParams>): Promise<WebBuildR
   }
   const tsnePapers = paperIds.filter((p) => embByPaper.has(p));
   const coordByPaper = new Map<string, [number, number, number]>();
+  // Projection parameters are chosen by a COMPUTED separation metric (mean
+  // silhouette of the Louvain communities in the 3D coordinates), not by eye.
+  // The full sweep is recorded in stats.projectionSweep. Deterministic: seeded.
+  let projectionSweep: { chosen: SweepEntry; entries: SweepEntry[] } | null = null;
   if (tsnePapers.length >= 3) {
-    const Y = tsne(tsnePapers.map((p) => embByPaper.get(p)!), { seed: params.seed });
-    tsnePapers.forEach((p, i) => coordByPaper.set(p, [Y[i][0], Y[i][1], Y[i][2]]));
+    const tsneLabels = tsnePapers.map((p) => (communityByPaper[p] !== undefined ? communityByPaper[p] : -1));
+    const selection = selectProjection(tsnePapers.map((p) => embByPaper.get(p)!), tsneLabels, params.seed);
+    tsnePapers.forEach((p, i) => coordByPaper.set(p, [selection.coords[i][0], selection.coords[i][1], selection.coords[i][2]]));
+    projectionSweep = { chosen: selection.chosen, entries: selection.entries };
   }
 
   // Community embedding centroids -> pairwise similarity -> domain-distance factor.
@@ -760,6 +766,9 @@ export async function buildWeb(paramsIn?: Partial<WebParams>): Promise<WebBuildR
     // pre-reset demo; after the reset it degenerates and modularity is primary).
     ari: { vsLibrariesAll: round4(ariAll), vsLibrariesOnTopic: ariOnTopic === null ? null : round4(ariOnTopic), note: "meaningful only while libraries exist; after the corpus reset use modularity." },
     tsneCoords: coordByPaper.size,
+    // The projection parameter sweep: every candidate tried with its computed
+    // separation metrics, plus the chosen setting. Evidence for the choice.
+    projectionSweep,
     orphanReport: { tinyCommunities, lowDegreePapers },
     citations: citePairs.size,
     topAbc: abcScored.length,
@@ -768,7 +777,10 @@ export async function buildWeb(paramsIn?: Partial<WebParams>): Promise<WebBuildR
   // ---------------------------------------------------------------------
   // WRITE (transactional, immutable run)
   // ---------------------------------------------------------------------
-  const [runRow] = await db.insert(webBuildRuns).values({ params, status: "running" }).returning({ id: webBuildRuns.id });
+  // The chosen projection params ride on the run's params (jsonb; no migration
+  // needed) so the run records exactly how its coordinates were produced.
+  const paramsWithProjection = { ...params, projection: projectionSweep ? projectionSweep.chosen : null };
+  const [runRow] = await db.insert(webBuildRuns).values({ params: paramsWithProjection, status: "running" }).returning({ id: webBuildRuns.id });
   const runId = runRow.id;
   try {
     await db.transaction(async (tx) => {

@@ -21,12 +21,20 @@ export async function POST(request: Request) {
 
   try {
     const result = await proposeCrossovers(webRunId);
+    // All three shapes carry diagnostics; the client renders the real reason and
+    // the stage-by-stage pipeline, never an opaque message.
     if (result.status === "nothing") {
-      return NextResponse.json({ error: result.reason }, { status: 422 });
+      return NextResponse.json({ error: result.reason, diagnostics: result.diagnostics }, { status: 422 });
+    }
+    if (result.status === "failed") {
+      return NextResponse.json({ error: result.reason, stage: result.stage, diagnostics: result.diagnostics }, { status: 500 });
     }
     return NextResponse.json(result);
   } catch (error) {
+    // Should not happen (every stage is guarded), but if it does, surface the
+    // real message rather than an opaque abort.
     console.error("POST /api/web/propose failed:", error);
-    return NextResponse.json({ error: "The proposal run could not complete." }, { status: 500 });
+    const message = error instanceof Error ? error.message : String(error);
+    return NextResponse.json({ error: `The proposal run failed unexpectedly: ${message}` }, { status: 500 });
   }
 }

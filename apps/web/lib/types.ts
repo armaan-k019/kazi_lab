@@ -448,12 +448,40 @@ export type WebStats = {
   modularity?: number;
   projectionDensity?: { beforeIdf: number; afterIdf: number; note: string };
   tsneCoords?: number;
+  // Projection parameter sweep: every candidate tried with its computed
+  // separation metrics, and the chosen setting (selected by silhouette).
+  projectionSweep?: {
+    chosen: { perplexity: number; earlyExaggeration: number; silhouette: number; intraInterRatio: number };
+    entries: { perplexity: number; earlyExaggeration: number; silhouette: number; intraInterRatio: number }[];
+    note?: string;
+  };
   ari?: { vsLibrariesAll: number; vsLibrariesOnTopic: number | null; note: string };
   orphanReport?: {
     tinyCommunities: { community: number; size: number; papers: string[] }[];
     lowDegreePapers: { title: string; projDegree: number; library: string }[];
   };
 };
+// Diagnostics attached to every proposal-run response (completed, nothing, or
+// failed): the stage-by-stage pipeline, drop reasons, and per-service status.
+export type WebProposeDiagnostics = {
+  webRunId: string | null;
+  stages: { stage: string; status: "ok" | "failed" | "short_circuit"; note: string | null }[];
+  candidatesConsidered: number;
+  proposalsFromModel: number;
+  dropped: { reason: string; count: number }[];
+  services: { service: string; status: "ok" | "degraded" | "unavailable" | "not_used"; reason: string }[];
+  critique: "completed" | "skipped_no_links" | "failed" | "not_run";
+  critiqueNote: string | null;
+};
+export type WebProposeOutcome = {
+  kind: "completed" | "nothing" | "failed";
+  message: string;
+  stage: string | null;
+  proposed: number | null;
+  note: string | null;
+  diagnostics: WebProposeDiagnostics | null;
+};
+
 export type WebLatest = {
   run: { id: string; params: Record<string, unknown>; stats: WebStats; completedAt: string | null } | null;
   communities: WebCommunity[];

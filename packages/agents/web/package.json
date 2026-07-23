@@ -9,7 +9,7 @@
   "scripts": {
     "build-web": "tsx src/build-web-cli.ts",
     "propose": "tsx src/propose-cli.ts",
-    "test": "tsx --test src/graph-algos.test.ts src/tsne.test.ts"
+    "test": "tsx --test src/graph-algos.test.ts src/tsne.test.ts src/projection-select.test.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.102.0",
