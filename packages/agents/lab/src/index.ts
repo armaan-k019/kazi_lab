@@ -11,5 +11,7 @@ export {
 export { extractJsonObject } from "./json";
 export {
   assembleLibrary,
+  resolveEvidenceRef,
+  KINDS,
   type LibraryAssembly,
 } from "./cross-domain";

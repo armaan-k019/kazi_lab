@@ -403,3 +403,53 @@ export type WriterLatest = {
   experimentalistRuns: { id: string; claim: string; completedAt: string | null; hasDocument: boolean }[];
   document: WriterDocument | null;
 };
+
+// Research web (shapes from /api/web/*).
+export type WebGraphNode = {
+  id: string;
+  refId: string | null;
+  label: string | null;
+  community: number | null;
+  degree: number | null;
+  isBridge: boolean;
+};
+export type WebGraphEdge = { src: string | null; dst: string | null; kind: string; weight: number };
+export type WebCommunity = { index: number; label: string | null; size: number | null };
+export type WebAbcCandidate = {
+  score: number;
+  payload: {
+    a_label: string;
+    c_label: string;
+    a_community?: number;
+    c_community?: number;
+    path_evidence?: { b_label: string; a_leg_papers: { title: string }[]; c_leg_papers: { title: string }[] }[];
+  };
+};
+export type WebDiscovery = {
+  id: string;
+  level: string;
+  summary: string;
+  rationale: string | null;
+  verdict: string | null;
+  evidence: { kind: string; ref: string; excerpt: string | null }[];
+};
+export type WebStats = {
+  nodes?: { papers: number; claims: number; methods: number; datasets: number; concepts: number; conceptMerges: number; total: number };
+  edges?: Record<string, number>;
+  projectionEdges?: number;
+  citations?: number;
+  ari?: { vsLibrariesAll: number; vsLibrariesOnTopic: number | null; note: string };
+  orphanReport?: {
+    tinyCommunities: { community: number; size: number; papers: string[] }[];
+    lowDegreePapers: { title: string; projDegree: number; library: string }[];
+  };
+};
+export type WebLatest = {
+  run: { id: string; params: Record<string, unknown>; stats: WebStats; completedAt: string | null } | null;
+  communities: WebCommunity[];
+  nodes: WebGraphNode[];
+  edges: WebGraphEdge[];
+  abc: WebAbcCandidate[];
+  nodeBridges: { score: number; payload: { title: string; communities: number[] } }[];
+  discoveries: WebDiscovery[];
+};

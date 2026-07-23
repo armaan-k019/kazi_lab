@@ -57,8 +57,18 @@ export function TabBar({ active, onSelect }: Props) {
         );
       })}
 
-      {/* Lab-level view (reads across projects), set apart from the agent tabs. */}
+      {/* Lab-level views (corpus-wide / across projects), set apart from agents.
+          Web is the primary substrate and the default landing view. */}
       <LabTab
+        label="Web"
+        subtitle="corpus knowledge graph"
+        active={active === "web"}
+        onSelect={() => onSelect("web")}
+        pushRight
+      />
+      <LabTab
+        label="Cross-Domain"
+        subtitle="lab, across projects"
         active={active === "cross-domain"}
         onSelect={() => onSelect("cross-domain")}
       />
@@ -67,17 +77,26 @@ export function TabBar({ active, onSelect }: Props) {
 }
 
 function LabTab({
+  label,
+  subtitle,
   active,
   onSelect,
+  pushRight,
 }: {
+  label: string;
+  subtitle: string;
   active: boolean;
   onSelect: () => void;
+  pushRight?: boolean;
 }) {
   return (
     <button
       type="button"
       onClick={onSelect}
-      className="group relative -mb-px ml-auto flex flex-col items-start pb-3 pt-1 text-left"
+      className={[
+        "group relative -mb-px flex flex-col items-start pb-3 pt-1 text-left",
+        pushRight ? "ml-auto" : "",
+      ].join(" ")}
       aria-current={active ? "page" : undefined}
     >
       <span className="flex items-center gap-2">
@@ -91,10 +110,10 @@ function LabTab({
             active ? "text-text-primary" : "text-text-secondary group-hover:text-text-primary",
           ].join(" ")}
         >
-          Cross-Domain
+          {label}
         </span>
       </span>
-      <span className="mt-1 pl-[18px] text-[12px] text-text-muted">lab, across projects</span>
+      <span className="mt-1 pl-[18px] text-[12px] text-text-muted">{subtitle}</span>
 
       {active && (
         <motion.span

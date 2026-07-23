@@ -9,11 +9,13 @@ import { CriticView } from "@/components/critic/critic-view";
 import { CrossDomainView } from "@/components/cross-domain/cross-domain-view";
 import { ExperimentalistView } from "@/components/experimentalist/experimentalist-view";
 import { WriterView } from "@/components/writer/writer-view";
+import { WebView } from "@/components/web/web-view";
 import { DormantView } from "@/components/dormant-view";
 import { AGENTS, type ViewId } from "@/lib/agents";
 
 export default function Home() {
-  const [active, setActive] = useState<ViewId>("scribe");
+  // The research web is the primary substrate and the default landing view.
+  const [active, setActive] = useState<ViewId>("web");
   const agent = AGENTS.find((a) => a.id === active);
 
   return (
@@ -30,7 +32,9 @@ export default function Home() {
             exit={{ opacity: 0, y: -8 }}
             transition={{ duration: 0.2, ease: "easeOut" }}
           >
-            {active === "scribe" ? (
+            {active === "web" ? (
+              <WebView />
+            ) : active === "scribe" ? (
               <ScribeView />
             ) : active === "critic" ? (
               <CriticView />

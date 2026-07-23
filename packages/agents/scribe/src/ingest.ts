@@ -20,32 +20,20 @@ export type IngestResult = {
   claimsInserted: number;
   alreadyIngested: boolean; // kept for the existing UI; true when we linked an existing paper
   linkedExisting: boolean;
-  libraryId: string;
+  libraryId: string | null; // null = joined the corpus with no library (research web is corpus-wide)
 };
 
-// Resolve the target library: the given id (validated), or the default
-// "general" library (created if it somehow doesn't exist yet).
-async function resolveLibraryId(libraryId?: string): Promise<string> {
-  if (libraryId) {
-    const [lib] = await db
-      .select({ id: libraries.id })
-      .from(libraries)
-      .where(eq(libraries.id, libraryId))
-      .limit(1);
-    if (!lib) throw new Error(`Library not found: ${libraryId}`);
-    return lib.id;
-  }
-  const [general] = await db
+// Validate a given library id. Library selection is OPTIONAL now: a paper with
+// no library simply joins the corpus (and the research web on next build). Only
+// called when a libraryId was actually provided.
+async function resolveLibraryId(libraryId: string): Promise<string> {
+  const [lib] = await db
     .select({ id: libraries.id })
     .from(libraries)
-    .where(eq(libraries.name, "general"))
+    .where(eq(libraries.id, libraryId))
     .limit(1);
-  if (general) return general.id;
-  const [created] = await db
-    .insert(libraries)
-    .values({ name: "general", description: "Default library." })
-    .returning({ id: libraries.id });
-  return created.id;
+  if (!lib) throw new Error(`Library not found: ${libraryId}`);
+  return lib.id;
 }
 
 export async function ingestPaper(
@@ -58,7 +46,9 @@ export async function ingestPaper(
     `Fetched ${paper.sourceType} source: "${paper.title || "(untitled)"}"`,
   );
 
-  const targetLibraryId = await resolveLibraryId(libraryId);
+  // Optional: only attach a library when one was chosen. No library means the
+  // paper joins the corpus directly (the web is the primary substrate now).
+  const targetLibraryId = libraryId ? await resolveLibraryId(libraryId) : null;
 
   // Dedupe before the (costly) extraction call. arXiv keys on arxiv_id; other
   // sources key on the canonical URL. A known paper is linked to the target
@@ -76,11 +66,15 @@ export async function ingestPaper(
         .limit(1);
   if (existing.length > 0) {
     const paperId = existing[0].id;
-    await db
-      .insert(paperLibraries)
-      .values({ paperId, libraryId: targetLibraryId })
-      .onConflictDoNothing();
-    console.log(`Already ingested: ${paperId}. Linked to library.`);
+    if (targetLibraryId) {
+      await db
+        .insert(paperLibraries)
+        .values({ paperId, libraryId: targetLibraryId })
+        .onConflictDoNothing();
+      console.log(`Already ingested: ${paperId}. Linked to library.`);
+    } else {
+      console.log(`Already ingested: ${paperId}. No library selected; corpus membership unchanged.`);
+    }
     return {
       paperId,
       claimsInserted: 0,
@@ -167,11 +161,13 @@ export async function ingestPaper(
       claimsInserted = extraction.claims.length;
     }
 
-    // Link the new paper to the target library.
-    await tx
-      .insert(paperLibraries)
-      .values({ paperId, libraryId: targetLibraryId })
-      .onConflictDoNothing();
+    // Link the new paper to the target library only if one was chosen.
+    if (targetLibraryId) {
+      await tx
+        .insert(paperLibraries)
+        .values({ paperId, libraryId: targetLibraryId })
+        .onConflictDoNothing();
+    }
 
     await tx
       .update(papers)

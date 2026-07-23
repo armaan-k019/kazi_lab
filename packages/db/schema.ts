@@ -7,6 +7,7 @@ import {
   numeric,
   pgTable,
   primaryKey,
+  real,
   text,
   timestamp,
   uniqueIndex,
@@ -591,8 +592,10 @@ export const crossDomainLinks = pgTable(
     isCandidate: boolean("is_candidate").notNull().default(false),
     // How this link entered the run: "synthesis" = the cross-domain synthesizer
     // proposed it; "discovery" = the cross-domain Critic's discovery pass found
-    // it (always a candidate). Both live under the same cross_domain_run_id.
-    source: text("source").notNull().default("synthesis"), // synthesis | discovery
+    // it; "web_discovery" = the research web's ABC/bridge crossover proposals
+    // (all candidates). All live under the same cross_domain_run_id and are
+    // audited by the same cross-domain Critic.
+    source: text("source").notNull().default("synthesis"), // synthesis | discovery | web_discovery
     rationale: text("rationale"),
     createdAt: timestamp("created_at").notNull().defaultNow(),
   },
@@ -824,3 +827,121 @@ export type WriterRun = typeof writerRuns.$inferSelect;
 export type NewWriterRun = typeof writerRuns.$inferInsert;
 export type ResearchDocument = typeof researchDocuments.$inferSelect;
 export type NewResearchDocument = typeof researchDocuments.$inferInsert;
+
+// ---------------------------------------------------------------------------
+// Research web: a corpus-wide knowledge graph that is the lab's PRIMARY
+// substrate (libraries become optional lenses on top). Nodes are papers,
+// claims, methods, datasets, and canonicalized concepts; edges are semantic
+// (paper-paper kNN), typed claim relations, and mention/use/report/cite links.
+// On top of the web: emergent domain discovery (seeded Louvain community
+// detection), bridge analytics (betweenness), and literature-based discovery
+// (Swanson ABC + structure-mapped analogy). Discovery outputs feed the EXISTING
+// validated cross-domain pipeline as candidates. Every build is an immutable
+// snapshot; a rebuild is a new run.
+// ---------------------------------------------------------------------------
+
+export const webBuildRuns = pgTable("web_build_runs", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  // knn_k, semantic_floor, louvain_resolution, seed, concept_merge_threshold,
+  // and the projection edge-weight vector.
+  params: jsonb("params").notNull(),
+  status: text("status").notNull().default("running"), // running | completed | failed
+  // node/edge/community counts, ARI vs libraries, orphan report.
+  stats: jsonb("stats"),
+  notes: text("notes"),
+  error: text("error"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  completedAt: timestamp("completed_at"),
+});
+
+// The communities are inserted before nodes in the same run so a node can carry
+// a real FK to its community. community_index is the Louvain integer label.
+export const webCommunities = pgTable(
+  "web_communities",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    runId: uuid("run_id")
+      .notNull()
+      .references(() => webBuildRuns.id, { onDelete: "cascade" }),
+    communityIndex: integer("community_index").notNull(),
+    label: text("label"), // LLM-assigned from top concepts/methods (labeling, not analysis)
+    size: integer("size"),
+    topConcepts: jsonb("top_concepts"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (table) => [index("web_communities_run_idx").on(table.runId)],
+);
+
+export const webNodes = pgTable(
+  "web_nodes",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    runId: uuid("run_id")
+      .notNull()
+      .references(() => webBuildRuns.id, { onDelete: "cascade" }),
+    kind: text("kind").notNull(), // paper | claim | method | concept | dataset
+    refTable: text("ref_table"), // provenance to the source row
+    refId: uuid("ref_id"), // null for merged concepts (see mergedFrom)
+    mergedFrom: jsonb("merged_from"), // for concepts: the terms merged into this node
+    label: text("label"),
+    canonicalLabel: text("canonical_label"),
+    degree: integer("degree"), // filled at build time (projection or full-graph degree)
+    communityId: uuid("community_id").references(() => webCommunities.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (table) => [index("web_nodes_run_kind_idx").on(table.runId, table.kind)],
+);
+
+export const webEdges = pgTable(
+  "web_edges",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    runId: uuid("run_id")
+      .notNull()
+      .references(() => webBuildRuns.id, { onDelete: "cascade" }),
+    srcNodeId: uuid("src_node_id")
+      .notNull()
+      .references(() => webNodes.id, { onDelete: "cascade" }),
+    dstNodeId: uuid("dst_node_id")
+      .notNull()
+      .references(() => webNodes.id, { onDelete: "cascade" }),
+    // semantic | supports | contradicts | extends | mentions_concept |
+    // uses_method | reports_dataset | cites
+    kind: text("kind").notNull(),
+    weight: real("weight").notNull(),
+    provenance: jsonb("provenance"), // claim_relation id, similarity score, key_terms source, etc.
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (table) => [index("web_edges_run_kind_idx").on(table.runId, table.kind)],
+);
+
+// Deterministic bridge analytics + ABC (Swanson) discovery candidates.
+export const webBridges = pgTable(
+  "web_bridges",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    runId: uuid("run_id")
+      .notNull()
+      .references(() => webBuildRuns.id, { onDelete: "cascade" }),
+    kind: text("kind").notNull(), // edge_bridge | node_bridge | abc
+    score: real("score").notNull(),
+    // abc: {a_node, b_evidence, c_node, a_community, c_community, path_evidence}
+    // bridges: the edge/node + the communities it connects + betweenness.
+    payload: jsonb("payload").notNull(),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (table) => [index("web_bridges_run_kind_score_idx").on(table.runId, table.kind, table.score)],
+);
+
+export type WebBuildRun = typeof webBuildRuns.$inferSelect;
+export type NewWebBuildRun = typeof webBuildRuns.$inferInsert;
+export type WebCommunity = typeof webCommunities.$inferSelect;
+export type NewWebCommunity = typeof webCommunities.$inferInsert;
+export type WebNode = typeof webNodes.$inferSelect;
+export type NewWebNode = typeof webNodes.$inferInsert;
+export type WebEdge = typeof webEdges.$inferSelect;
+export type NewWebEdge = typeof webEdges.$inferInsert;
+export type WebBridge = typeof webBridges.$inferSelect;
+export type NewWebBridge = typeof webBridges.$inferInsert;

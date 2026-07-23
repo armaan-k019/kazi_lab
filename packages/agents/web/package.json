@@ -1,0 +1,28 @@
+{
+  "name": "@kazi-lab/web-graph",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "build-web": "tsx src/build-web-cli.ts",
+    "propose": "tsx src/propose-cli.ts",
+    "test": "tsx --test src/graph-algos.test.ts"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.102.0",
+    "@kazi-lab/db": "workspace:*",
+    "@kazi-lab/lab": "workspace:*",
+    "@kazi-lab/scribe": "workspace:*",
+    "dotenv": "^17.4.2",
+    "drizzle-orm": "^0.45.2",
+    "graphology": "^0.26.0",
+    "graphology-communities-louvain": "^2.0.2",
+    "graphology-metrics": "^2.4.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.22.4"
+  }
+}

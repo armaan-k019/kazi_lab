@@ -1,8 +1,9 @@
 export type AgentId = "scribe" | "critic" | "experimentalist" | "writer";
 
-// Top-level views. Agents are per-library; "cross-domain" is a lab-level view
-// that reads across projects, so it lives in the nav but is not an agent.
-export type ViewId = AgentId | "cross-domain";
+// Top-level views. Agents are per-library; "web" (the corpus-wide research web,
+// the primary substrate and default landing view) and "cross-domain" are
+// lab-level views, so they live in the nav but are not agents.
+export type ViewId = AgentId | "cross-domain" | "web";
 
 export type Agent = {
   id: AgentId;
