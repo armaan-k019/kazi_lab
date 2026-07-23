@@ -412,6 +412,10 @@ export type WebGraphNode = {
   community: number | null;
   degree: number | null;
   isBridge: boolean;
+  influence: number;
+  x: number | null;
+  y: number | null;
+  z: number | null;
 };
 export type WebGraphEdge = { src: string | null; dst: string | null; kind: string; weight: number };
 export type WebCommunity = { index: number; label: string | null; size: number | null };
@@ -422,6 +426,9 @@ export type WebAbcCandidate = {
     c_label: string;
     a_community?: number;
     c_community?: number;
+    base_score?: number;
+    domain_distance_factor?: number;
+    community_similarity?: number | null;
     path_evidence?: { b_label: string; a_leg_papers: { title: string }[]; c_leg_papers: { title: string }[] }[];
   };
 };
@@ -438,6 +445,9 @@ export type WebStats = {
   edges?: Record<string, number>;
   projectionEdges?: number;
   citations?: number;
+  modularity?: number;
+  projectionDensity?: { beforeIdf: number; afterIdf: number; note: string };
+  tsneCoords?: number;
   ari?: { vsLibrariesAll: number; vsLibrariesOnTopic: number | null; note: string };
   orphanReport?: {
     tinyCommunities: { community: number; size: number; papers: string[] }[];

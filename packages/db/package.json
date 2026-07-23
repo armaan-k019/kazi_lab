@@ -10,7 +10,8 @@
   "scripts": {
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
-    "db:studio": "drizzle-kit studio"
+    "db:studio": "drizzle-kit studio",
+    "reset": "tsx reset-cli.ts"
   },
   "dependencies": {
     "dotenv": "^17.4.2",
@@ -19,6 +20,7 @@
     "pg": "^8.21.0"
   },
   "devDependencies": {
-    "@types/pg": "^8.20.0"
+    "@types/pg": "^8.20.0",
+    "tsx": "^4.22.4"
   }
 }

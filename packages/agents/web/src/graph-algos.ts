@@ -181,6 +181,25 @@ export function adjustedRandIndex(a: number[], b: number[]): number {
   return (sumIndex - expected) / (max - expected);
 }
 
+// Inverse document frequency, clamped non-negative. Used to down-weight
+// concept-sharing edges: a concept in almost every paper contributes ~0, a rare
+// shared concept contributes a lot. This fixes the projection-density problem
+// where ubiquitous concepts connected nearly every pair of papers.
+export function idf(df: number, n: number): number {
+  if (n <= 0) return 0;
+  return Math.max(0, Math.log(n / (1 + df)));
+}
+
+// Domain-distance factor for ABC/bridge ranking. simAC is the cosine similarity
+// between two communities' embedding centroids (in [-1, 1]). Candidates spanning
+// DISTANT (low-similarity) communities score higher: this is the mechanism that
+// hunts for real links between genuinely different fields rather than
+// near-neighbors. Always >= 1 (never suppresses; only rewards distance).
+export function domainDistanceFactor(simAC: number, alpha = 1): number {
+  const dist = Math.max(0, 1 - simAC); // 0 (identical) .. 2 (opposite)
+  return 1 + alpha * dist;
+}
+
 export type WeightedEdge = { a: string; b: string; weight: number };
 
 // Build an undirected weighted graphology graph, summing parallel edge weights.

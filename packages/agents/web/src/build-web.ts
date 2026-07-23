@@ -14,6 +14,9 @@ import { embedTexts } from "@kazi-lab/scribe";
 import {
   adjustedRandIndex,
   computeBetweenness,
+  cosineSim,
+  domainDistanceFactor,
+  idf,
   louvainPartition,
   mergeTermsByEmbedding,
   normalizeTerm,
@@ -24,6 +27,7 @@ import {
   type WeightVector,
   type WeightedEdge,
 } from "./graph-algos";
+import { tsne } from "./tsne";
 
 const MODEL = MODELS.judgment;
 
@@ -44,6 +48,14 @@ export const DEFAULT_PARAMS = {
   // other attribute nodes does not seed ABC pairs (it would be a truism anyway;
   // the degree penalty already suppresses it). Documented, not silent.
   abcBNeighborCap: 60,
+  // Shared concepts contribute their IDF (not a flat count) to the projection
+  // weight, so ubiquitous concepts add ~0 and only rare shared concepts matter.
+  // A projection edge below this weight is dropped, which is what fractures the
+  // previously near-complete (dense) projection.
+  minProjectionWeight: 0.15,
+  // Domain-distance factor strength: how much a candidate spanning distant
+  // (low-similarity) communities is rewarded over a near-neighbor one.
+  distanceAlpha: 1.0,
 };
 export type WebParams = typeof DEFAULT_PARAMS;
 
@@ -328,19 +340,47 @@ export async function buildWeb(paramsIn?: Partial<WebParams>): Promise<WebBuildR
       }
     }
   };
-  accumShared(paperConcepts, (s) => (s.sharedConcepts += 1));
+  // Concepts contribute their IDF (not a flat count of 1) to sharedConcepts, so
+  // a concept shared by nearly every paper adds ~0 and a rare shared concept
+  // adds a lot. This is the fix for the previously near-complete projection.
+  const N = paperIds.length;
+  {
+    const conceptPapers = new Map<string, string[]>();
+    for (const [paperId, canons] of paperConcepts) {
+      for (const canon of canons) {
+        const arr = conceptPapers.get(canon) ?? [];
+        arr.push(paperId);
+        conceptPapers.set(canon, arr);
+      }
+    }
+    for (const ps of conceptPapers.values()) {
+      const contribution = idf(ps.length, N);
+      if (contribution <= 0) continue;
+      for (let i = 0; i < ps.length; i++) {
+        for (let j = i + 1; j < ps.length; j++) ensure(pairKey(ps[i], ps[j])).sharedConcepts += contribution;
+      }
+    }
+  }
   accumShared(paperMethods, (s) => (s.sharedMethods += 1));
   accumShared(paperDatasets, (s) => (s.sharedDatasets += 1));
   for (const [k, n] of claimPairSignals) ensure(k).claimLinks = n;
   for (const k of citePairs) ensure(k).citations = 1;
 
+  // Density before (any signal) vs after (IDF-weighted weight >= threshold): the
+  // threshold fractures the dense projection so distant papers stop connecting.
+  let rawSignalPairs = 0;
   const projEdges: WeightedEdge[] = [];
   for (const [k, s] of signals) {
     const weight = projectionWeight(s, w);
     if (weight <= 0) continue;
+    rawSignalPairs++;
+    if (weight < params.minProjectionWeight) continue;
     const [a, b] = k.split("|");
     projEdges.push({ a, b, weight });
   }
+  const maxPairs = (N * (N - 1)) / 2;
+  const densityBefore = maxPairs > 0 ? rawSignalPairs / maxPairs : 0;
+  const densityAfter = maxPairs > 0 ? projEdges.length / maxPairs : 0;
 
   // ---------------------------------------------------------------------
   // COMMUNITY DETECTION (seeded Louvain on the projection)
@@ -392,6 +432,69 @@ export async function buildWeb(paramsIn?: Partial<WebParams>): Promise<WebBuildR
   const communityIndices = [...new Set(Object.values(communityByPaper))].sort((a, b) => a - b);
 
   // ---------------------------------------------------------------------
+  // 3D t-SNE PROJECTION + COMMUNITY CENTROIDS (view coords + distance factor)
+  // ---------------------------------------------------------------------
+  const embRows = (await db.execute<{ entity_id: string; emb: string }>(sql`
+    select entity_id, embedding::text emb from embeddings where entity_type = 'paper'`)).rows;
+  const embByPaper = new Map<string, number[]>();
+  for (const r of embRows) {
+    try {
+      const v = JSON.parse(r.emb) as number[];
+      if (Array.isArray(v) && v.length) embByPaper.set(r.entity_id, v);
+    } catch {
+      // skip an unparseable embedding
+    }
+  }
+  const tsnePapers = paperIds.filter((p) => embByPaper.has(p));
+  const coordByPaper = new Map<string, [number, number, number]>();
+  if (tsnePapers.length >= 3) {
+    const Y = tsne(tsnePapers.map((p) => embByPaper.get(p)!), { seed: params.seed });
+    tsnePapers.forEach((p, i) => coordByPaper.set(p, [Y[i][0], Y[i][1], Y[i][2]]));
+  }
+
+  // Community embedding centroids -> pairwise similarity -> domain-distance factor.
+  const centroid = new Map<number, number[]>();
+  for (const ci of communityIndices) {
+    const members = paperIds.filter((p) => communityByPaper[p] === ci && embByPaper.has(p)).map((p) => embByPaper.get(p)!);
+    if (!members.length) continue;
+    const dim = members[0].length;
+    const c = new Array(dim).fill(0);
+    for (const m of members) for (let d = 0; d < dim; d++) c[d] += m[d] / members.length;
+    centroid.set(ci, c);
+  }
+  const commSim = (a: number, b: number): number => {
+    const ca = centroid.get(a);
+    const cb = centroid.get(b);
+    return ca && cb ? cosineSim(ca, cb) : 0.5; // unknown -> neutral
+  };
+  const distFactor = (a: number, b: number): number => domainDistanceFactor(commSim(a, b), params.distanceAlpha);
+
+  // Modularity of the partition on the IDF-thresholded projection: the new sanity
+  // metric (ARI vs libraries is no longer meaningful once libraries are deleted).
+  const modularity = ((): number => {
+    let m2 = 0;
+    const sumTot = new Map<number, number>();
+    const sumIn = new Map<number, number>();
+    for (const e of projEdges) {
+      const ca = communityByPaper[e.a];
+      const cb = communityByPaper[e.b];
+      if (ca === undefined || cb === undefined) continue;
+      m2 += 2 * e.weight;
+      sumTot.set(ca, (sumTot.get(ca) ?? 0) + e.weight);
+      sumTot.set(cb, (sumTot.get(cb) ?? 0) + e.weight);
+      if (ca === cb) sumIn.set(ca, (sumIn.get(ca) ?? 0) + 2 * e.weight);
+    }
+    if (m2 === 0) return 0;
+    let q = 0;
+    for (const ci of communityIndices) {
+      const inC = (sumIn.get(ci) ?? 0) / m2;
+      const totC = (sumTot.get(ci) ?? 0) / m2;
+      q += inC - totC * totC;
+    }
+    return q;
+  })();
+
+  // ---------------------------------------------------------------------
   // NODE DEGREE (full-graph, for storage + ABC penalty basis)
   // ---------------------------------------------------------------------
   const degree = new Map<string, number>();
@@ -421,21 +524,34 @@ export async function buildWeb(paramsIn?: Partial<WebParams>): Promise<WebBuildR
   }
   type BridgePayload = Record<string, unknown>;
   const bridges: { kind: "node_bridge" | "edge_bridge" | "abc"; score: number; payload: BridgePayload }[] = [];
+  // The max domain-distance factor among the communities a node bridges.
+  const maxDistFactor = (comms: number[]): number => {
+    let f = 1;
+    for (let i = 0; i < comms.length; i++) for (let j = i + 1; j < comms.length; j++) f = Math.max(f, distFactor(comms[i], comms[j]));
+    return f;
+  };
   const nodeBridgeCandidates = paperIds
     .filter((p) => (neighborCommunities.get(p)?.size ?? 0) >= 2)
-    .map((p) => ({ paperId: p, betweenness: betweenness[p] ?? 0, communities: [...(neighborCommunities.get(p) ?? [])] }))
-    .sort((a, b) => b.betweenness - a.betweenness)
+    .map((p) => {
+      const communities = [...(neighborCommunities.get(p) ?? [])];
+      const factor = maxDistFactor(communities);
+      return { paperId: p, betweenness: betweenness[p] ?? 0, communities, factor, score: (betweenness[p] ?? 0) * factor };
+    })
+    .sort((a, b) => b.score - a.score)
     .slice(0, params.topNbridges);
   for (const nb of nodeBridgeCandidates) {
-    bridges.push({ kind: "node_bridge", score: nb.betweenness, payload: { paper_id: nb.paperId, title: titleByPaper.get(nb.paperId), betweenness: nb.betweenness, communities: nb.communities } });
+    bridges.push({ kind: "node_bridge", score: nb.score, payload: { paper_id: nb.paperId, title: titleByPaper.get(nb.paperId), betweenness: round4(nb.betweenness), domain_distance_factor: round4(nb.factor), communities: nb.communities } });
   }
   const edgeBridgeCandidates = projEdges
     .filter((e) => communityByPaper[e.a] !== communityByPaper[e.b])
-    .map((e) => ({ e, score: e.weight * (1 + (betweenness[e.a] ?? 0) + (betweenness[e.b] ?? 0)) }))
+    .map((e) => {
+      const factor = distFactor(communityByPaper[e.a], communityByPaper[e.b]);
+      return { e, factor, score: e.weight * (1 + (betweenness[e.a] ?? 0) + (betweenness[e.b] ?? 0)) * factor };
+    })
     .sort((a, b) => b.score - a.score)
     .slice(0, params.topNbridges);
   for (const eb of edgeBridgeCandidates) {
-    bridges.push({ kind: "edge_bridge", score: eb.score, payload: { a_paper: eb.e.a, a_title: titleByPaper.get(eb.e.a), b_paper: eb.e.b, b_title: titleByPaper.get(eb.e.b), weight: eb.e.weight, communities: [communityByPaper[eb.e.a], communityByPaper[eb.e.b]] } });
+    bridges.push({ kind: "edge_bridge", score: eb.score, payload: { a_paper: eb.e.a, a_title: titleByPaper.get(eb.e.a), b_paper: eb.e.b, b_title: titleByPaper.get(eb.e.b), weight: round4(eb.e.weight), domain_distance_factor: round4(eb.factor), communities: [communityByPaper[eb.e.a], communityByPaper[eb.e.b]] } });
   }
 
   // ---------------------------------------------------------------------
@@ -499,15 +615,23 @@ export async function buildWeb(paramsIn?: Partial<WebParams>): Promise<WebBuildR
   const abcScored = [...abcAcc.entries()]
     .map(([key, acc]) => {
       const [a, c] = key.split("|");
+      const ca = communityByKey.get(a);
+      const cc = communityByKey.get(c);
+      // Domain-distance factor: reward candidates spanning distant communities.
+      const factor = ca !== undefined && cc !== undefined ? distFactor(ca, cc) : 1;
+      const baseScore = scoreABC(acc.contributions);
       return {
-        score: scoreABC(acc.contributions),
+        score: baseScore * factor,
         payload: {
           a_node: a,
           a_label: labelOfKey(a),
           c_node: c,
           c_label: labelOfKey(c),
-          a_community: communityByKey.get(a),
-          c_community: communityByKey.get(c),
+          a_community: ca,
+          c_community: cc,
+          base_score: round4(baseScore),
+          domain_distance_factor: round4(factor),
+          community_similarity: ca !== undefined && cc !== undefined ? round4(commSim(ca, cc)) : null,
           path_evidence: acc.paths
             .sort((x, y) => y.aPapers.length + y.cPapers.length - (x.aPapers.length + x.cPapers.length))
             .slice(0, 6)
@@ -626,7 +750,16 @@ export async function buildWeb(paramsIn?: Partial<WebParams>): Promise<WebBuildR
     projectionEdges: projEdges.length,
     communities: communityIndices.length,
     communityLabels: communityIndices.map((ci) => ({ index: ci, size: communitySize(ci), label: labelByCommunity.get(ci) ?? null })),
-    ari: { vsLibrariesAll: round4(ariAll), vsLibrariesOnTopic: ariOnTopic === null ? null : round4(ariOnTopic), note: "vsLibrariesOnTopic restricts to papers in a real (non-general) library; vsLibrariesAll groups general-only papers as one label." },
+    // New primary sanity metric (independent of libraries): modularity of the
+    // emergent partition on the IDF-thresholded projection.
+    modularity: round4(modularity),
+    // Projection density before vs after IDF down-weighting + thresholding. A big
+    // drop means IDF fractured the previously near-complete projection.
+    projectionDensity: { beforeIdf: round4(densityBefore), afterIdf: round4(densityAfter), note: "beforeIdf = fraction of paper pairs with any shared signal; afterIdf = fraction whose IDF-weighted projection weight >= minProjectionWeight." },
+    // ARI vs libraries is only meaningful while libraries exist (kept for the
+    // pre-reset demo; after the reset it degenerates and modularity is primary).
+    ari: { vsLibrariesAll: round4(ariAll), vsLibrariesOnTopic: ariOnTopic === null ? null : round4(ariOnTopic), note: "meaningful only while libraries exist; after the corpus reset use modularity." },
+    tsneCoords: coordByPaper.size,
     orphanReport: { tinyCommunities, lowDegreePapers },
     citations: citePairs.size,
     topAbc: abcScored.length,
@@ -650,7 +783,8 @@ export async function buildWeb(paramsIn?: Partial<WebParams>): Promise<WebBuildR
       const nodeIdByKey = new Map<string, string>();
       const nodeValues = nodes.map((n) => {
         const ci = communityByKey.get(n.key);
-        return { runId, kind: n.kind, refTable: n.refTable, refId: n.refId, mergedFrom: n.mergedFrom, label: n.label, canonicalLabel: n.canonicalLabel, degree: degree.get(n.key) ?? 0, communityId: ci !== undefined ? communityIdByIndex.get(ci) ?? null : null, _key: n.key };
+        const coord = n.kind === "paper" && n.refId ? coordByPaper.get(n.refId) : undefined;
+        return { runId, kind: n.kind, refTable: n.refTable, refId: n.refId, mergedFrom: n.mergedFrom, label: n.label, canonicalLabel: n.canonicalLabel, degree: degree.get(n.key) ?? 0, communityId: ci !== undefined ? communityIdByIndex.get(ci) ?? null : null, coordX: coord ? coord[0] : null, coordY: coord ? coord[1] : null, coordZ: coord ? coord[2] : null, _key: n.key };
       });
       for (const chunk of chunked(nodeValues, 500)) {
         const inserted = await tx.insert(webNodes).values(chunk.map(({ _key, ...v }) => v)).returning({ id: webNodes.id });

@@ -889,10 +889,25 @@ export const webNodes = pgTable(
     communityId: uuid("community_id").references(() => webCommunities.id, {
       onDelete: "set null",
     }),
+    // Deterministic 3D t-SNE coordinates over the paper embeddings, persisted so
+    // the view is stable across loads (paper nodes only; null for others).
+    coordX: real("coord_x"),
+    coordY: real("coord_y"),
+    coordZ: real("coord_z"),
     createdAt: timestamp("created_at").notNull().defaultNow(),
   },
   (table) => [index("web_nodes_run_kind_idx").on(table.runId, table.kind)],
 );
+
+// On-disk-free cache of ConceptNet lookups (the discovery layer grounds proposed
+// analogies in ConceptNet's real relation graph). One row per normalized term.
+export const conceptnetCache = pgTable("conceptnet_cache", {
+  term: text("term").primaryKey(), // normalized concept term
+  payload: jsonb("payload").notNull(), // the related concepts + relations
+  fetchedAt: timestamp("fetched_at").notNull().defaultNow(),
+});
+export type ConceptnetCache = typeof conceptnetCache.$inferSelect;
+export type NewConceptnetCache = typeof conceptnetCache.$inferInsert;
 
 export const webEdges = pgTable(
   "web_edges",

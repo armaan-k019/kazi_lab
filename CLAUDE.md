@@ -119,10 +119,17 @@ Next.js 14+ App Router | TypeScript strict | Tailwind | Postgres via Neon | Driz
 - No tests for code that does not exist.
 - No commits before human review.
 
+## Standing convention: decision log
+
+`docs/context.md` is the running decision log for the project. Update it with any
+consequential decision (architecture, data, integrations, scope, or a deliberate
+deviation) made in any future prompt. Append newest-first with date, decision,
+reasoning, and consequences. It replaces `docs/project-state.md` as the living record.
+
 ## See also
 
+- `docs/context.md` for the running decision log (update this on any consequential decision)
 - `docs/architecture.md` for system design
-- `docs/project-state.md` for current state
 - `docs/lessons.md` for accumulated learnings (living document)
 - `.claude/skills/` for task-specific instructions
 - `.claude/hooks/` for deterministic enforcement

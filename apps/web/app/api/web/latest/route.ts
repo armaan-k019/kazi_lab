@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import {
   crossDomainCriticRuns,
   crossDomainLinkEvidence,
@@ -7,6 +7,7 @@ import {
   crossDomainRuns,
   db,
   linkVerdicts,
+  paperExternal,
   webBridges,
   webBuildRuns,
   webCommunities,
@@ -57,6 +58,18 @@ export async function GET(request: Request) {
       bridges.filter((b) => b.kind === "node_bridge").map((b) => (b.payload as { paper_id?: string }).paper_id).filter(Boolean) as string[],
     );
 
+    // Influence = OpenAlex citation count where known, else claim count. Drives
+    // point size in the 3D view.
+    const paperRefIds = paperNodeRows.map((n) => n.refId).filter((x): x is string => !!x);
+    const citeCounts = new Map<string, number>();
+    const claimCounts = new Map<string, number>();
+    if (paperRefIds.length) {
+      const ex = await db.select({ paperId: paperExternal.paperId, cited: paperExternal.citedByCount }).from(paperExternal).where(inArray(paperExternal.paperId, paperRefIds));
+      for (const e of ex) if (e.cited != null) citeCounts.set(e.paperId, e.cited);
+      const cc = await db.execute<{ paper_id: string; c: number }>(sql`select paper_id, count(*)::int c from claims where paper_id in (${sql.join(paperRefIds.map((id) => sql`${id}`), sql`, `)}) group by paper_id`);
+      for (const r of cc.rows) claimCounts.set(r.paper_id, r.c);
+    }
+
     const nodes = paperNodeRows.map((n) => ({
       id: n.id,
       refId: n.refId,
@@ -64,6 +77,10 @@ export async function GET(request: Request) {
       community: n.communityId ? commIndexById.get(n.communityId) ?? null : null,
       degree: n.degree,
       isBridge: n.refId ? nodeBridgePaperIds.has(n.refId) : false,
+      influence: n.refId ? (citeCounts.get(n.refId) ?? claimCounts.get(n.refId) ?? 0) : 0,
+      x: n.coordX,
+      y: n.coordY,
+      z: n.coordZ,
     }));
     const edges = ppEdges.map((e) => ({
       src: nodeIdToPaper.get(e.srcNodeId)?.refId ?? null,

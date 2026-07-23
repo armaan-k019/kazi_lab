@@ -56,3 +56,21 @@ export {
   METRIC_EXTRACTION_VERSION,
   type MetricExtractionResult,
 } from "./extract-metrics";
+// External research integrations (keyless-capable, non-fatal, honestly degrading).
+export {
+  resolveSemanticScholar,
+  fetchReferences,
+  fetchCitations,
+  semanticScholarKeyStatus,
+  type SSPaper,
+  type SSNeighbor,
+} from "./semantic-scholar";
+export {
+  conceptnetRelated,
+  groundAnalogy,
+  conceptnetSlug,
+  type AnalogyGrounding,
+} from "./conceptnet";
+export { datamuseAssociations } from "./datamuse";
+export { crossrefWork, type CrossrefWork } from "./crossref";
+export { backfillCitations, type BackfillResult } from "./citations-backfill";

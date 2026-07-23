@@ -8,4 +8,7 @@ export {
   mergeTermsByEmbedding,
   normalizeTerm,
   projectionWeight,
+  idf,
+  domainDistanceFactor,
 } from "./graph-algos";
+export { tsne, defaultTsneParams, TSNE_DEFAULTS, type TsneParams } from "./tsne";

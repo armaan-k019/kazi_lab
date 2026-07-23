@@ -7,6 +7,7 @@ import {
   runCrossDomainCritique,
   type LibraryAssembly,
 } from "@kazi-lab/lab";
+import { groundAnalogy } from "@kazi-lab/scribe";
 import {
   claims as claimsTable,
   crossDomainLinkEvidence,
@@ -184,6 +185,7 @@ export async function proposeCrossovers(
     level: string;
     summary: string;
     rationale: string;
+    confidence: "low" | "medium";
     libraryIds: string[];
     evidence: { libraryId: string; evidenceKind: string; evidenceRef: string; excerpt: string }[];
   };
@@ -221,7 +223,12 @@ export async function proposeCrossovers(
     // level: "method" where the mapping is a shared method node, else "concept".
     const level = cand.a_node.startsWith("method:") || cand.c_node.startsWith("method:") ? "method" : "concept";
     const libraryIds = [...new Set(evidence.map((e) => e.libraryId))];
-    links.push({ level, summary: mapping, rationale: `${str(p.why_structural) ?? ""} Claim to test: ${claimToTest}`.trim(), libraryIds, evidence });
+    // ConceptNet grounding: does the analogy have a real semantic relation path?
+    // Absence is recorded and lowers confidence; it never auto-rejects.
+    const grounding = await groundAnalogy(cand.a_label, cand.c_label);
+    const confidence: "low" | "medium" = grounding.grounded ? "medium" : "low";
+    const rationale = `${str(p.why_structural) ?? ""} Claim to test: ${claimToTest}. ConceptNet grounding: ${grounding.note}${grounding.path.length ? ` [${grounding.path.join(" -> ")}]` : ""}.`.trim();
+    links.push({ level, summary: mapping, rationale, confidence, libraryIds, evidence });
   }
 
   if (links.length === 0) {
@@ -241,7 +248,9 @@ export async function proposeCrossovers(
           level: l.level,
           summary: l.summary,
           libraryIds: l.libraryIds,
-          confidence: "low",
+          // Confidence reflects ConceptNet grounding (medium if a relation path
+          // exists, low otherwise). Never above medium for web discovery.
+          confidence: l.confidence,
           // Server-side enforcement: web discovery NEVER asserts.
           isCandidate: true,
           source: "web_discovery",
