@@ -55,19 +55,32 @@ const UNASSIGNED_COLOR = 0x8a95a8;
 const MAX_EDGES_DRAWN = 3000; // documented cap, selected by weight
 const INTRA_TOP_K = 4; // strongest intra-community edges kept per node
 const INTRA_ALPHA = 0.10;
-const BRIDGE_ALPHA = 0.42;
+// Reduced ~20 percent from 0.42: with the soft clouds behind them the old
+// brightness read as clutter.
+const BRIDGE_ALPHA = 0.34;
 const BRIDGE_COLOR = 0xe0b48a; // warm neutral so bridges visually pop
 const BRIDGE_ARC_SEGMENTS = 10; // bezier samples per bridge edge
 const BRIDGE_ARC_LIFT = 0.14; // arc height as a fraction of edge length
 const EGO_EDGE_BOOST = 1.8; // edge alpha multiplier inside a selected ego network
 const EDGE_DIM_FACTOR = 0.12; // edges outside the ego network keep this alpha fraction
 
-// Community identity: billboarded centroid labels + a soft halo sprite at the
-// centroid scaled to the community's spatial extent. The sprite halo was chosen
-// over a convex hull because it is one draw call per community, needs no hull
-// computation, and reads clearly at this corpus size (documented choice).
-const HALO_OPACITY = 0.055;
-const HALO_SCALE = 2.6; // halo diameter = extent RMS radius x this
+// Community identity: billboarded centroid labels + a layered ATMOSPHERE per
+// community. Each community gets a small stack of soft radial-gradient
+// billboard sprites (jittered, phase-offset, additive) whose sum reads as a
+// volumetric glow, never a shape. Clouds frame the papers; they must always
+// sit visually BELOW the points. If a cloud swallows its papers, lower
+// CLOUD_SPRITE_OPACITY first, then CLOUD_BASE_SCALE.
+const CLOUD_LAYERS = 4; // sprites per community (3 to 5); more = denser volume, more draw calls
+const CLOUD_SPRITE_OPACITY = 0.06; // per-sprite peak alpha; raise = thicker glow (keep 0.04 to 0.08)
+const CLOUD_BASE_SCALE = 1.2; // cloud diameter vs community extent; raise = wider halo
+const CLOUD_LAYER_SCALES = [0.8, 1.0, 1.15, 1.3]; // relative size per layer; spread = depth illusion
+const CLOUD_JITTER = 0.4; // layer offset as a fraction of extent; raise = puffier, lower = tighter
+const CLOUD_FADE_MS = 600; // toggle fade duration
+const CLOUD_DRIFT_SCALE = 0.018; // idle scale-breathing amplitude (1 to 2 percent band)
+const CLOUD_DRIFT_POS = 0.5; // idle positional drift amplitude in world units; raise = more alive
+const CLOUD_DRIFT_PERIOD_MS_MIN = 8000; // slowest-to-fastest drift period band per sprite
+const CLOUD_DRIFT_PERIOD_MS_MAX = 15000;
+const CLOUD_INSIDE_FADE = 1.15; // camera closer than extent x this fades that community's cloud
 const LABEL_COLOR = "#dde3ec";
 const LABEL_MAX_OPACITY = 0.85;
 const LABEL_FADE_NEAR = 14; // camera closer than this to a centroid fades its label
@@ -89,11 +102,26 @@ const BLOOM_STRENGTH = 0.5;
 const BLOOM_RADIUS = 0.55;
 const BLOOM_THRESHOLD = 0.6;
 
-// Background star dust: a faint static field for parallax depth. Deterministic
-// (seeded) so the scene is stable across mounts.
+// Background star dust: a faint field for parallax depth. Deterministic
+// (seeded) so the scene is stable across mounts. It counter-rotates very
+// slowly against the idle orbit for an extra depth cue.
 const STAR_COUNT = 240;
 const STAR_ALPHA = 0.32;
 const STAR_SIZE = 1.1;
+const STAR_COUNTER_ROTATE = 0.004; // rad/s, opposite the orbit direction
+
+// Bridge direction cue (toggle, default OFF): no geometry at all. When on,
+// the bridge line itself carries a brightness gradient, dim at the
+// lower-degree end and brighter toward the higher-degree end (the direction
+// of influence/dependency). The cone arrowheads were deleted: they turned
+// the graph center into noise.
+const DIR_GRADIENT_DIM = 0.55; // alpha multiple at the source end when the cue is on
+const DIR_GRADIENT_BRIGHT = 1.45; // alpha multiple at the target end when the cue is on
+
+// Proximity brightening: edges near the camera lift slightly so the local
+// structure reads while distant edges stay atmospheric.
+const EDGE_PROX_BOOST = 0.35; // max extra alpha multiple at zero depth
+const EDGE_PROX_FALLOFF = 45; // world units; boost = exp(-depth / falloff)
 
 function communityColor(c: number | null): number {
   return c === null || c < 0 ? UNASSIGNED_COLOR : COMMUNITY_PALETTE[c % COMMUNITY_PALETTE.length];
@@ -111,16 +139,19 @@ function mulberry32(seed: number): () => number {
   };
 }
 
-// Soft radial sprite texture shared by the halos.
-function makeRadialTexture(): THREE.CanvasTexture {
-  const size = 128;
+// Ultra-soft radial texture for the cloud sprites: alpha falls to zero well
+// before the rim so no edge can ever show, whatever the sprite scale.
+function makeCloudTexture(): THREE.CanvasTexture {
+  const size = 256;
   const canvas = document.createElement("canvas");
   canvas.width = size;
   canvas.height = size;
   const ctx = canvas.getContext("2d")!;
   const g = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
   g.addColorStop(0, "rgba(255,255,255,1)");
-  g.addColorStop(0.4, "rgba(255,255,255,0.45)");
+  g.addColorStop(0.25, "rgba(255,255,255,0.55)");
+  g.addColorStop(0.55, "rgba(255,255,255,0.18)");
+  g.addColorStop(0.85, "rgba(255,255,255,0.03)");
   g.addColorStop(1, "rgba(255,255,255,0)");
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, size, size);
@@ -202,19 +233,29 @@ void main() {
 }
 `;
 
-// Line shader: per-vertex color + alpha, manual FogExp2 attenuation.
+// Line shader: per-vertex color + alpha, manual FogExp2 attenuation, plus a
+// slight proximity lift so edges near the camera brighten. aGrad carries the
+// 0..1 position along a bridge (oriented low-degree to high-degree); with
+// uDirGradient on, alpha ramps along it as the direction cue. uAlphaMult is
+// the dev tuning multiplier (1 in production use).
 const LINE_VERTEX = `
 attribute vec3 aColor;
 attribute float aAlpha;
+attribute float aGrad;
 varying vec3 vColor;
 varying float vAlpha;
 varying float vFog;
 uniform float uFogDensity;
+uniform float uDirGradient;
+uniform float uAlphaMult;
 void main() {
   vColor = aColor;
-  vAlpha = aAlpha;
   vec4 mv = modelViewMatrix * vec4(position, 1.0);
-  float f = uFogDensity * -mv.z;
+  float depth = -mv.z;
+  float prox = 1.0 + ${EDGE_PROX_BOOST.toFixed(2)} * exp(-depth / ${EDGE_PROX_FALLOFF.toFixed(1)});
+  float dir = mix(1.0, mix(${DIR_GRADIENT_DIM.toFixed(2)}, ${DIR_GRADIENT_BRIGHT.toFixed(2)}, aGrad), uDirGradient);
+  vAlpha = aAlpha * prox * dir * uAlphaMult;
+  float f = uFogDensity * depth;
   vFog = exp(-f * f);
   gl_Position = projectionMatrix * mv;
 }
@@ -234,6 +275,9 @@ type HoverInfo = { label: string; community: number | null; influence: number; x
 // rebuilding the scene.
 type SceneApi = {
   setEdgeMode(showEdges: boolean, bridgesOnly: boolean): void;
+  setCloudMode(showClouds: boolean): void;
+  setArrowMode(showArrows: boolean): void;
+  setDevTuning(t: { cloudOpacity?: number; cloudScale?: number; bridgeAlpha?: number }): void;
   setSelection(refId: string | null, expand: boolean): void;
   setLegendEmphasis(community: number | null, isolate: boolean): void;
   resetView(): void;
@@ -251,10 +295,14 @@ export function WebGraph3D({
   onSelect: (refId: string) => void;
 }) {
   const mountRef = useRef<HTMLDivElement | null>(null);
+  const wrapperRef = useRef<HTMLDivElement | null>(null); // fullscreen element
   const apiRef = useRef<SceneApi | null>(null);
   const [hover, setHover] = useState<HoverInfo | null>(null);
   const [showEdges, setShowEdges] = useState(true); // edges are the legibility win: ON by default
   const [bridgesOnly, setBridgesOnly] = useState(false);
+  const [showClouds, setShowClouds] = useState(true); // community clouds ON by default
+  const [showArrows, setShowArrows] = useState(false); // bridge direction arrows OFF by default
+  const [isFullscreen, setIsFullscreen] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
   const [isolated, setIsolated] = useState<number | null>(null);
   const [drawnEdgeCounts, setDrawnEdgeCounts] = useState<{ intra: number; bridge: number } | null>(null);
@@ -270,7 +318,9 @@ export function WebGraph3D({
     const mount = mountRef.current;
     if (!mount || placed.length === 0) return;
     const width = mount.clientWidth || 800;
-    const height = HEIGHT;
+    // The container's height changes on fullscreen; read it live (the
+    // ResizeObserver below keeps camera and composer in step).
+    const height = mount.clientHeight || HEIGHT;
     const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
     const scene = new THREE.Scene();
@@ -448,24 +498,38 @@ export function WebGraph3D({
     intraGeo.setAttribute("position", new THREE.BufferAttribute(intraPos, 3));
     intraGeo.setAttribute("aColor", new THREE.BufferAttribute(intraCol, 3));
     intraGeo.setAttribute("aAlpha", new THREE.BufferAttribute(intraAlpha, 1));
-    const lineMat = new THREE.ShaderMaterial({
-      vertexShader: LINE_VERTEX,
-      fragmentShader: LINE_FRAGMENT,
-      uniforms: { uFogDensity: { value: FOG_DENSITY } },
-      transparent: true,
-      blending: THREE.AdditiveBlending,
-      depthWrite: false,
-    });
-    const intraLines = new THREE.LineSegments(intraGeo, lineMat);
+    // Neutral gradient position: intra edges never carry the direction cue.
+    intraGeo.setAttribute("aGrad", new THREE.BufferAttribute(new Float32Array(intraVertCount).fill(0.5), 1));
+    const makeLineMat = () =>
+      new THREE.ShaderMaterial({
+        vertexShader: LINE_VERTEX,
+        fragmentShader: LINE_FRAGMENT,
+        uniforms: { uFogDensity: { value: FOG_DENSITY }, uDirGradient: { value: 0 }, uAlphaMult: { value: 1 } },
+        transparent: true,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      });
+    const intraMat = makeLineMat();
+    const bridgeMat = makeLineMat(); // separate instance: the direction cue and dev tuning act on bridges only
+    const intraLines = new THREE.LineSegments(intraGeo, intraMat);
     scene.add(intraLines);
 
     // Bridge segments: gentle bezier arcs (sampled), warm color, brighter.
+    // aGrad runs 0..1 along each arc oriented from the lower-degree endpoint
+    // to the higher-degree one, so the shader's direction cue can ramp
+    // brightness along the line (no arrow geometry anywhere).
+    const graphDegree = new Map<number, number>();
+    for (const e of eligible) {
+      graphDegree.set(e.a, (graphDegree.get(e.a) ?? 0) + 1);
+      graphDegree.set(e.b, (graphDegree.get(e.b) ?? 0) + 1);
+    }
     const segsPerBridge = BRIDGE_ARC_SEGMENTS;
     const bridgeVertCount = drawnBridges.length * segsPerBridge * 2;
     const bridgePos = new Float32Array(bridgeVertCount * 3);
     const bridgeCol = new Float32Array(bridgeVertCount * 3);
     const bridgeBaseAlpha = new Float32Array(bridgeVertCount);
     const bridgeAlpha = new Float32Array(bridgeVertCount);
+    const bridgeGrad = new Float32Array(bridgeVertCount);
     const bridgeColor = new THREE.Color(BRIDGE_COLOR);
     const va = new THREE.Vector3();
     const vb = new THREE.Vector3();
@@ -484,6 +548,7 @@ export function WebGraph3D({
       const curve = new THREE.QuadraticBezierCurve3(va.clone(), ctrl, vb.clone());
       const samples = curve.getPoints(segsPerBridge);
       const w = BRIDGE_ALPHA * (0.55 + 0.45 * (e.weight / maxWeight));
+      const towardB = (graphDegree.get(e.b) ?? 0) >= (graphDegree.get(e.a) ?? 0);
       for (let s = 0; s < segsPerBridge; s++) {
         for (const [slot, p] of [[0, samples[s]], [1, samples[s + 1]]] as const) {
           const v = (k * segsPerBridge + s) * 2 + slot;
@@ -495,6 +560,8 @@ export function WebGraph3D({
           bridgeCol[v * 3 + 2] = bridgeColor.b;
           bridgeBaseAlpha[v] = w;
           bridgeAlpha[v] = w;
+          const t = (s + slot) / segsPerBridge;
+          bridgeGrad[v] = towardB ? t : 1 - t;
         }
       }
     });
@@ -502,7 +569,8 @@ export function WebGraph3D({
     bridgeGeo.setAttribute("position", new THREE.BufferAttribute(bridgePos, 3));
     bridgeGeo.setAttribute("aColor", new THREE.BufferAttribute(bridgeCol, 3));
     bridgeGeo.setAttribute("aAlpha", new THREE.BufferAttribute(bridgeAlpha, 1));
-    const bridgeLines = new THREE.LineSegments(bridgeGeo, lineMat);
+    bridgeGeo.setAttribute("aGrad", new THREE.BufferAttribute(bridgeGrad, 1));
+    const bridgeLines = new THREE.LineSegments(bridgeGeo, bridgeMat);
     scene.add(bridgeLines);
 
     // -----------------------------------------------------------------------
@@ -525,28 +593,65 @@ export function WebGraph3D({
       rms = Math.sqrt(rms / members.length);
       centroids.set(ci, { center, extent: Math.max(rms, 2) });
     }
-    const radialTex = makeRadialTexture();
-    const haloSprites: THREE.Sprite[] = [];
+    // Layered cloud sprites: 3 to 5 soft billboards per community, jittered
+    // deterministically from the community index so the layout is stable
+    // across loads. Their additive sum reads as atmosphere, never a shape.
+    const cloudTex = makeCloudTexture();
+    type CloudSprite = {
+      sprite: THREE.Sprite;
+      mat: THREE.SpriteMaterial;
+      community: number;
+      center: THREE.Vector3; // community centroid (for the inside-fade)
+      radius: number; // community glow radius (for the inside-fade)
+      basePos: THREE.Vector3;
+      baseScale: number;
+      driftDir: THREE.Vector3;
+      phase: number;
+      periodMs: number;
+    };
+    const clouds: CloudSprite[] = [];
+    for (const [ci, { center, extent }] of centroids) {
+      const rng = mulberry32(4242 + ci * 131);
+      for (let layer = 0; layer < CLOUD_LAYERS; layer++) {
+        const mat = new THREE.SpriteMaterial({
+          map: cloudTex,
+          color: communityColor(ci),
+          transparent: true,
+          opacity: 0, // fades in on the first frames
+          blending: THREE.AdditiveBlending,
+          depthWrite: false,
+        });
+        const sprite = new THREE.Sprite(mat);
+        sprite.raycast = () => {}; // purely visual, never pickable
+        const jitter = new THREE.Vector3(rng() * 2 - 1, rng() * 2 - 1, rng() * 2 - 1).multiplyScalar(extent * CLOUD_JITTER);
+        const basePos = center.clone().add(jitter);
+        const layerScale = CLOUD_LAYER_SCALES[layer % CLOUD_LAYER_SCALES.length];
+        const baseScale = extent * 2 * CLOUD_BASE_SCALE * layerScale * (0.92 + 0.16 * rng());
+        sprite.position.copy(basePos);
+        sprite.scale.setScalar(baseScale);
+        scene.add(sprite);
+        clouds.push({
+          sprite,
+          mat,
+          community: ci,
+          center: center.clone(),
+          radius: extent * CLOUD_BASE_SCALE,
+          basePos,
+          baseScale,
+          driftDir: new THREE.Vector3(rng() * 2 - 1, rng() * 2 - 1, (rng() * 2 - 1) * 0.5).normalize(),
+          phase: rng() * Math.PI * 2,
+          periodMs: CLOUD_DRIFT_PERIOD_MS_MIN + rng() * (CLOUD_DRIFT_PERIOD_MS_MAX - CLOUD_DRIFT_PERIOD_MS_MIN),
+        });
+      }
+    }
+    let cloudsOn = true;
+    // Dev tuning multipliers (the dev-only sliders; 1 in normal use).
+    const devTuning = { cloudOpacity: 1, cloudScale: 1 };
+
     const labelSprites: { sprite: THREE.Sprite; center: THREE.Vector3 }[] = [];
     const labelTextures: THREE.CanvasTexture[] = [];
     const labelMats: THREE.SpriteMaterial[] = [];
-    const haloMats: THREE.SpriteMaterial[] = [];
     for (const [ci, { center, extent }] of centroids) {
-      const haloMat = new THREE.SpriteMaterial({
-        map: radialTex,
-        color: communityColor(ci),
-        transparent: true,
-        opacity: HALO_OPACITY,
-        blending: THREE.AdditiveBlending,
-        depthWrite: false,
-      });
-      const halo = new THREE.Sprite(haloMat);
-      halo.position.copy(center);
-      halo.scale.setScalar(extent * HALO_SCALE);
-      scene.add(halo);
-      haloSprites.push(halo);
-      haloMats.push(haloMat);
-
       const text = commLabel.get(ci) ?? `community ${ci}`;
       const { tex, aspect } = makeLabelTexture(text);
       labelTextures.push(tex);
@@ -729,6 +834,19 @@ export function WebGraph3D({
         intraLines.visible = edgesOn && !onlyBridges;
         bridgeLines.visible = edgesOn;
       },
+      setCloudMode(on: boolean) {
+        cloudsOn = on; // the loop fades opacity toward the new target
+      },
+      setArrowMode(on: boolean) {
+        // The direction cue is a shader gradient on the bridge lines; no
+        // geometry exists to show or hide.
+        bridgeMat.uniforms.uDirGradient.value = on ? 1 : 0;
+      },
+      setDevTuning(t: { cloudOpacity?: number; cloudScale?: number; bridgeAlpha?: number }) {
+        if (t.cloudOpacity !== undefined) devTuning.cloudOpacity = t.cloudOpacity;
+        if (t.cloudScale !== undefined) devTuning.cloudScale = t.cloudScale;
+        if (t.bridgeAlpha !== undefined) bridgeMat.uniforms.uAlphaMult.value = t.bridgeAlpha;
+      },
       setSelection(refId: string | null, expand: boolean) {
         if (refId === null) {
           clearSelection();
@@ -771,9 +889,13 @@ export function WebGraph3D({
     // -----------------------------------------------------------------------
     let raf = 0;
     let disposed = false;
+    let lastFrameT = performance.now();
     const animate = () => {
       if (disposed) return;
       raf = requestAnimationFrame(animate);
+      const nowT = performance.now();
+      const dt = Math.min(0.05, (nowT - lastFrameT) / 1000);
+      lastFrameT = nowT;
 
       // Camera easing.
       if (ease) {
@@ -807,6 +929,34 @@ export function WebGraph3D({
         (sprite.material as THREE.SpriteMaterial).opacity = LABEL_MAX_OPACITY * fade;
       }
 
+      // Community clouds: fade toward their target (toggle, legend emphasis,
+      // camera-inside; 600ms transitions) and drift gently so the atmosphere
+      // feels alive. Drift is disabled under prefers-reduced-motion.
+      const fadeStep = dt * (CLOUD_SPRITE_OPACITY / (CLOUD_FADE_MS / 1000));
+      for (const c of clouds) {
+        let mult = cloudsOn ? 1 : 0;
+        if (cloudsOn && legendCommunity !== null) {
+          if (c.community === legendCommunity) mult = 1.3;
+          else mult = legendIsolate ? 0 : 0.35;
+        }
+        if (camera.position.distanceTo(c.center) < c.radius * CLOUD_INSIDE_FADE) mult = 0;
+        const target = CLOUD_SPRITE_OPACITY * mult * devTuning.cloudOpacity;
+        const delta = target - c.mat.opacity;
+        c.mat.opacity = Math.abs(delta) <= fadeStep ? target : c.mat.opacity + Math.sign(delta) * fadeStep;
+
+        if (reducedMotion) {
+          c.sprite.scale.setScalar(c.baseScale * devTuning.cloudScale);
+        } else {
+          const t = (nowT / c.periodMs) * Math.PI * 2 + c.phase;
+          c.sprite.scale.setScalar(c.baseScale * devTuning.cloudScale * (1 + CLOUD_DRIFT_SCALE * Math.sin(t)));
+          c.sprite.position.copy(c.basePos).addScaledVector(c.driftDir, Math.sin(t * 0.7) * CLOUD_DRIFT_POS);
+        }
+      }
+
+      // Star dust counter-rotation: a slow drift against the idle orbit for a
+      // parallax depth cue. Static under prefers-reduced-motion.
+      if (!reducedMotion) stars.rotation.y -= STAR_COUNTER_ROTATE * dt;
+
       controls.update();
       composer.render();
     };
@@ -836,11 +986,12 @@ export function WebGraph3D({
     // -----------------------------------------------------------------------
     const resizeObserver = new ResizeObserver(() => {
       const w = mount.clientWidth || 800;
-      camera.aspect = w / height;
+      const h = mount.clientHeight || HEIGHT; // fullscreen changes both axes
+      camera.aspect = w / h;
       camera.updateProjectionMatrix();
-      renderer.setSize(w, height);
-      composer.setSize(w, height);
-      bloom.setSize(w, height);
+      renderer.setSize(w, h);
+      composer.setSize(w, h);
+      bloom.setSize(w, h);
     });
     resizeObserver.observe(mount);
 
@@ -863,11 +1014,12 @@ export function WebGraph3D({
       starMat.dispose();
       intraGeo.dispose();
       bridgeGeo.dispose();
-      lineMat.dispose();
-      for (const m of haloMats) m.dispose();
+      intraMat.dispose();
+      bridgeMat.dispose();
+      cloudTex.dispose();
+      for (const c of clouds) c.mat.dispose();
       for (const m of labelMats) m.dispose();
       for (const t of labelTextures) t.dispose();
-      radialTex.dispose();
       bloom.dispose();
       composer.dispose();
       renderer.dispose();
@@ -882,6 +1034,27 @@ export function WebGraph3D({
   useEffect(() => {
     apiRef.current?.setEdgeMode(showEdges, bridgesOnly);
   }, [showEdges, bridgesOnly]);
+  useEffect(() => {
+    apiRef.current?.setCloudMode(showClouds);
+  }, [showClouds]);
+  useEffect(() => {
+    apiRef.current?.setArrowMode(showArrows);
+  }, [showArrows]);
+
+  // Fullscreen via the standard Fullscreen API on the wrapper; Esc exits (the
+  // browser handles it) and the fullscreenchange listener keeps state in step.
+  useEffect(() => {
+    const onFullscreenChange = () => setIsFullscreen(Boolean(document.fullscreenElement));
+    document.addEventListener("fullscreenchange", onFullscreenChange);
+    return () => document.removeEventListener("fullscreenchange", onFullscreenChange);
+  }, []);
+  const toggleFullscreen = () => {
+    if (document.fullscreenElement) {
+      void document.exitFullscreen();
+    } else {
+      void wrapperRef.current?.requestFullscreen();
+    }
+  };
 
   const legendHover = (ci: number | null) => {
     if (isolated !== null) return; // isolation wins over hover emphasis
@@ -906,11 +1079,30 @@ export function WebGraph3D({
   }
 
   return (
-    <div className="relative">
-      <div ref={mountRef} className="relative w-full overflow-hidden rounded-lg" style={{ height: HEIGHT }}>
+    <div ref={wrapperRef} className="relative" style={isFullscreen ? { backgroundColor: "#0b0d10" } : undefined}>
+      <div ref={mountRef} className={`relative w-full overflow-hidden ${isFullscreen ? "" : "rounded-lg"}`} style={{ height: isFullscreen ? "100vh" : HEIGHT }}>
         {/* Vignette: DOM overlay, zero GPU cost in-scene. */}
         <div className="pointer-events-none absolute inset-0 z-10" style={{ background: "radial-gradient(ellipse at center, transparent 55%, rgba(4,6,8,0.55) 100%)" }} />
       </div>
+
+      {/* Fullscreen affordances: an enter button over the canvas; in
+          fullscreen, only minimal controls (reset + exit) and the Esc hint. */}
+      {!isFullscreen && (
+        <button type="button" onClick={toggleFullscreen} className="absolute right-2 top-2 z-20 rounded border border-border bg-surface/80 px-2 py-0.5 text-[11px] text-text-secondary transition-colors hover:border-accent/40 hover:text-accent">
+          fullscreen
+        </button>
+      )}
+      {isFullscreen && (
+        <div className="absolute right-3 top-3 z-20 flex items-center gap-2">
+          <span className="rounded bg-surface/70 px-2 py-0.5 text-[11px] text-text-muted">Esc to exit</span>
+          <button type="button" onClick={() => apiRef.current?.resetView()} className="rounded border border-border bg-surface/80 px-2 py-0.5 text-[11px] text-text-secondary transition-colors hover:border-accent/40 hover:text-accent">
+            reset view
+          </button>
+          <button type="button" onClick={toggleFullscreen} className="rounded border border-border bg-surface/80 px-2 py-0.5 text-[11px] text-text-secondary transition-colors hover:border-accent/40 hover:text-accent">
+            exit fullscreen
+          </button>
+        </div>
+      )}
 
       {hover && (
         <div className="pointer-events-none absolute z-20 max-w-sm rounded-lg border border-border bg-surface-raised px-3 py-2 text-[12px] text-text-primary shadow-sm" style={{ left: Math.min(hover.x + 12, (mountRef.current?.clientWidth ?? 600) - 220), top: hover.y + 12 }}>
@@ -921,12 +1113,19 @@ export function WebGraph3D({
         </div>
       )}
 
+      {!isFullscreen && (
       <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2">
         <label className="flex items-center gap-1.5 text-[12px] text-text-secondary">
           <input type="checkbox" checked={showEdges} onChange={(e) => setShowEdges(e.target.checked)} /> edges
         </label>
         <label className={`flex items-center gap-1.5 text-[12px] ${showEdges ? "text-text-secondary" : "text-text-muted"}`}>
           <input type="checkbox" checked={bridgesOnly} disabled={!showEdges} onChange={(e) => setBridgesOnly(e.target.checked)} /> bridges only
+        </label>
+        <label className={`flex items-center gap-1.5 text-[12px] ${showEdges ? "text-text-secondary" : "text-text-muted"}`}>
+          <input type="checkbox" checked={showArrows} disabled={!showEdges} onChange={(e) => setShowArrows(e.target.checked)} /> bridge direction
+        </label>
+        <label className="flex items-center gap-1.5 text-[12px] text-text-secondary">
+          <input type="checkbox" checked={showClouds} onChange={(e) => setShowClouds(e.target.checked)} /> clouds
         </label>
         <button type="button" onClick={() => apiRef.current?.resetView()} className="rounded border border-border px-2 py-0.5 text-[12px] text-text-secondary transition-colors hover:border-accent/40 hover:text-accent">
           reset view
@@ -942,8 +1141,10 @@ export function WebGraph3D({
           </span>
         )}
       </div>
+      )}
 
       {/* Interactive legend: hover highlights a community, click isolates it. */}
+      {!isFullscreen && (
       <div className="mt-2 flex flex-wrap items-center gap-2" onMouseLeave={() => legendHover(null)}>
         {communities.map((c) => (
           <button
@@ -959,10 +1160,50 @@ export function WebGraph3D({
           </button>
         ))}
       </div>
+      )}
 
+      {!isFullscreen && (
       <p className="mt-1.5 text-[11px] text-text-muted">
         drag to orbit, scroll to zoom, right-drag to pan · hover for a paper's title · click a paper to light its network (shift-click or "expand network" grows it one hop) · double-click to open the paper · click empty space to clear
       </p>
+      )}
+
+      {/* Dev-only tuning row: multipliers over the shipped constants so the
+          human can find good values by eye, then bake them into the constants
+          above. Never rendered in production builds. */}
+      {process.env.NODE_ENV === "development" && !isFullscreen && (
+        <div className="mt-2 flex flex-wrap items-center gap-x-5 gap-y-1 rounded-lg border border-dashed border-border px-3 py-2">
+          <span className="text-[10px] font-medium uppercase tracking-wide text-text-muted">dev tuning</span>
+          <DevSlider label="cloud opacity" min={0} max={2} step={0.05} initial={1} onChange={(v) => apiRef.current?.setDevTuning({ cloudOpacity: v })} />
+          <DevSlider label="cloud scale" min={0.4} max={1.8} step={0.05} initial={1} onChange={(v) => apiRef.current?.setDevTuning({ cloudScale: v })} />
+          <DevSlider label="bridge opacity" min={0} max={2} step={0.05} initial={1} onChange={(v) => apiRef.current?.setDevTuning({ bridgeAlpha: v })} />
+        </div>
+      )}
     </div>
+  );
+}
+
+// A minimal labeled range input for the dev tuning row (multiplier semantics:
+// 1 = the shipped constant).
+function DevSlider({ label, min, max, step, initial, onChange }: { label: string; min: number; max: number; step: number; initial: number; onChange: (v: number) => void }) {
+  const [value, setValue] = useState(initial);
+  return (
+    <label className="flex items-center gap-1.5 text-[11px] text-text-secondary">
+      {label}
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step={step}
+        value={value}
+        onChange={(e) => {
+          const v = Number(e.target.value);
+          setValue(v);
+          onChange(v);
+        }}
+        className="h-1 w-24"
+      />
+      <span className="w-8 font-mono text-[10px] text-text-muted">{value.toFixed(2)}</span>
+    </label>
   );
 }

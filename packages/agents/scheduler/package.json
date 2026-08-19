@@ -1,0 +1,23 @@
+{
+  "name": "@kazi-lab/scheduler",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "detect": "tsx src/detect-cli.ts",
+    "execute": "tsx src/execute-cli.ts",
+    "fan-out": "tsx src/fan-out-cli.ts",
+    "test": "tsx --test src/detection.test.ts"
+  },
+  "dependencies": {
+    "@kazi-lab/db": "workspace:*",
+    "dotenv": "^17.4.2",
+    "drizzle-orm": "^0.45.2"
+  },
+  "devDependencies": {
+    "tsx": "^4.22.4"
+  }
+}

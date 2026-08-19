@@ -31,7 +31,190 @@ nothing over a stretch; immutable snapshot runs; transactional writes; honest
 reporting of thin or failed results. Models come from packages/db/models.ts. No em
 dashes anywhere.
 
+## Autonomous Scheduler (Phase 1)
+
+The scheduler is the lab detecting what to do. One detection pass is an
+immutable snapshot (scheduler_runs + scheduler_tasks + scheduler_diagnostics,
+transactional): deterministic TypeScript reads the corpus state and queues
+actionable tasks with conservative cost estimates. No LLM is involved in
+detection; the scheduler proposes and the human approves every consequential
+move. Phase 1 is on-demand (a "Run detection now" button and a CLI); there is
+no daemon. SCHEDULER_INTERVAL_MINUTES documents the intended cadence for the
+future daemon and is advisory today.
+
+Detection rules (detectStaleStates, unit-tested, thresholdDays default 30):
+- stale synthesis (priority 5): latest completed synthesis older than the
+  threshold AND (papers added since, or the last attempt errored). A library
+  with papers and NO synthesis ever is also queued here (maximally stale).
+- missing metrics (priority 6): papers with key_terms exist but zero
+  paper_metrics rows for the library. Auto-approved (idempotent, only-missing).
+- missing cross-domain (priority 7): some synthesized library is uncovered by
+  the latest completed cross-domain run, or that run is older than the
+  threshold. One corpus-level task, not one per library.
+- missing proposals (priority 8): the latest cross-domain run has zero links
+  or every link was rejected by its critique.
+- api failures (diagnostic only): failed agent runs in the last 24h are
+  recorded; no retry task is queued in Phase 1 (human judgment).
+
+Approval workflow: extract_metrics is auto-approved (low-risk, idempotent,
+cost-capped); re_synthesize, re_critique, extract_cross_domain, and
+propose_crossovers require a human Approve. Defer and Reject are recorded
+states, not deletions. Execution wraps the existing agent CLIs as child
+processes (database-as-substrate: the scheduler never imports agent logic),
+sequentially with 5s spacing, per-task timeouts, and per-task transactional
+status updates. Completed agent work is never rolled back by a later task
+failure; the honest record is per-task status plus run counters.
+
+Cost estimates are conservative upper bounds from the prompt (~$0.30 per
+metrics library capped at $5 total, ~$2 per synthesis, ~$3 per cross-domain
+run, ~$1 per proposal run), stored per task and never asserted as precise.
+
 ## Decisions
+
+### 2026-08-19 Visual redesign: clouds to atmosphere, arrows to a shader cue, bot to a character
+Decision: a pure visual-quality pass on the 3D web and the SchedulerBot after
+the human judged the first render bad. Deleted outright (not flagged off):
+the octahedron community clouds and the instanced cone bridge arrows.
+Replaced with: (1) layered cloud sprites, 4 soft radial-gradient billboards
+per community (20 total at 5 communities), jittered deterministically from
+the community index, additive at 0.06 per-sprite opacity, drifting 1 to 2
+percent on 8 to 15s phase-offset periods, fading 600ms on toggle, still
+default ON; (2) a bridge direction cue as a brightness gradient along the
+line itself (aGrad vertex attribute oriented lower-degree to higher-degree,
+shader mix dim 0.55 to bright 1.45), default OFF, no geometry; bridge base
+alpha cut 0.42 to 0.34 so bridges sit calmly over the soft clouds. The bot
+was rebuilt as a plush penguin-blob: lathe egg body (wider bottom third,
+soft seat), vertex-color white face-and-belly panel over leafy green
+(#4fb585 default), flippers, feet nubs, one antenna, large low-set
+rounded-rect eyes with highlight dots, beak or mouth behind FACE_STYLE,
+blush cheeks, soft/toon material behind MATERIAL_STYLE, its own 3-light rig,
+a ground shadow that widens on squash, and squash-and-stretch animation for
+all five states (loading is a bounce, not a spin; error deflates under a
+little cloud, no shaking). /bot-test became the tuning cockpit (state
+buttons, face/material/cheek toggles, sliders for green hex, belly
+coverage, eye size and height, bounce amplitude, breathing speed, applied
+live through a tuning prop with no scene rebuild); the web view gained a
+dev-only tuning row (cloud opacity, cloud scale, bridge opacity multipliers)
+rendered only in development builds.
+Reasoning: octahedra read as collision meshes and occluded papers; cones
+turned the graph center into noise; the sphere bot had no character. Craft
+constraints applied throughout: no hard edges, everything eased, clouds must
+frame papers rather than cover them (per-sprite opacity capped at the 0.04
+to 0.08 band).
+Consequences: Claude Code cannot see renders, so final tuning is explicitly
+the human's, on /bot-test and the dev tuning row; keeper values get baked
+into BOT_DEFAULTS and the cloud constants. Frame cost could not be measured
+headlessly; the __measureWebGraph() console probe remains the tool. Known
+issue carried forward, out of scope here: executeApprovedTasks has no
+concurrency guard, and an overlapping CLI + UI execution of run b330c73d
+double-ran tasks (generative-3d also extracted zero rows in 40s and needs
+its own diagnosis).
+
+### 2026-08-18 Scheduler Phase 1 + metric fan-out Phase 2 + bot and web-viz enhancements built in one pass
+Decision: implement the scheduler schema (migration 0018), the deterministic
+detection engine with 12 unit tests, the approval/execution engine, the metric
+extraction fan-out, four scheduler API routes, a Scheduler panel in Discovery,
+the animated SchedulerBot, and the 3D web enhancements (fullscreen, community
+clouds, bridge arrows, proximity edge brightening, star counter-rotation) as
+one bundled prompt.
+Reasoning and notable deviations, each reconciling the prompt with the
+codebase or with itself:
+- scheduler_runs carries a status column (awaiting_approval | executing |
+  completed | failed) that the prompt's column list omitted but its approval
+  workflow requires. scheduler_tasks adds deferred and rejected statuses so
+  the Defer/Reject controls have real states.
+- The prompt's missing-metrics rule required a completed synthesis, but its
+  expected output requires cosmic-structure (never synthesized) to be flagged.
+  Metric extraction reads papers directly, so the synthesis precondition was
+  dropped. Likewise never-synthesized libraries queue re_synthesize, or they
+  would be invisible to the scheduler forever.
+- The prompt's "all tasks in a run succeed or all fail" transactionality is
+  impossible without undoing agents' own committed transactional writes.
+  Implemented instead: per-task transactional state, run counters always
+  consistent, failures recorded per task, later tasks still run.
+- The bot lives at apps/web/components/scheduler/scheduler-bot.tsx (the
+  prompt said packages/web and PascalCase filename; this repo's app is
+  apps/web with kebab-case files per CLAUDE.md).
+- The octahedron community clouds REPLACE the earlier radial sprite halos
+  rather than stacking on them (one glow system, not two); clouds are
+  non-pickable, fade over ~1s on toggle/legend/camera-inside, and are ON by
+  default with a toggle. Edge arrows (lower-degree toward higher-degree on
+  bridges) are OFF by default. The existing star field gained a slow
+  counter-rotation instead of a second constellation layer.
+- METRIC_EXTRACTION_BATCH_SIZE is stored and documented but not yet enforced:
+  the existing scribe CLI has no LIMIT mode and modifying scribe was out of
+  scope. ONLY_MISSING gives the actual cost control today.
+Consequences: detection on the real corpus (run f495f955) surfaced exactly
+the expected picture: extract_metrics on cosmic-structure, generative-3d, and
+urban-heat (auto-approved), re_synthesize cosmic-structure, and a corpus-level
+cross-domain refresh, ~$5.90 total upper bound. A plumbing smoke test
+(fan-out over spatial, ONLY_MISSING) recovered 81 metric rows from 2
+previously skipped papers in 127s, proving the execution path end to end.
+The spec's ~$0.30/library metrics estimate is optimistic against observed
+Opus extraction costs; recorded as-is per the prompt, with the command result
+recording what actually happened.
+Decision: record that the standing plan (guarded reset plus a diverse corpus
+reseed, intended to "give distance-forcing genuinely distant fields to bridge")
+is aimed at the wrong constraint, and should be reconsidered before it is run.
+Reasoning: with a valid API key the proposal pipeline completed cleanly for the
+first time, every stage ok, and still produced zero proposals. The diagnostics
+give the reason without ambiguity: 10 of 14 ABC candidates were dropped as
+"fewer than 2 groundable evidence papers (no synthesized library covers them)",
+and the proposer then declined to propose on the 4 survivors. Measuring library
+coverage per community on run 8412b5ce shows why. Cosmological Large-Scale
+Structure has 0 of 18 papers in a synthesized library and Foundation Models and
+Representation Learning has 1 of 29, while the three near-neighbor 3D-vision and
+urban communities are well covered (24/27, 14/17, 13/16). The corpus is already
+diverse: cosmology, quantum field theory, and foundation models are all present
+and are exactly what the top ABC candidates bridge (mesh to QFT, decay rate to
+mesh, foundation model to implicit bias). Those candidates are ungroundable only
+because the grounding contract requires evidence from a synthesized library, and
+44 percent of the corpus sits in two communities that have none. A reseed adds
+diversity the corpus does not lack, and would discard papers that are already the
+right ones. Consequences: the cheaper and better-targeted unblock is to run
+synthesis on the existing cosmic-structure library (it exists with 0 completed
+synthesis runs) and to create plus synthesize a library covering the foundation
+models cluster. Neither was run here: it is a real cost and it is wasted if the
+reset happens anyway, so the choice is left to the human. The grounding contract
+itself was NOT relaxed; requiring synthesized-library evidence is the provenance
+guarantee and weakening it to manufacture proposals would be exactly the
+fabrication this lab refuses.
+
+### 2026-08-18 Community labeling in build-web fails silently; same opacity class as the fixed proposal bug
+Decision: flag the bare catch at the community-labeling step in build-web as a
+residual instance of the opacity bug the proposal pipeline was just hardened
+against. Not fixed in this pass (diagnosis was the requested deliverable), but it
+should get the same stage-note treatment. Reasoning: a web build ran against a
+stale invalid key and completed with status "completed", notes null, and all five
+community labels null. The deterministic majority of the build succeeded, so the
+run looked healthy while the single LLM call inside it had failed and been
+swallowed by a catch that records nothing. Diagnosing this required querying
+web_communities directly, which is precisely the black-box situation the
+diagnostics work was meant to eliminate. Degrading rather than aborting is
+correct for a cosmetic step; recording nothing is not. Consequences: a rebuild
+with a valid key restored all five labels (run 8412b5ce), confirming the cause.
+Until build-web records why labeling degraded, an unlabeled 3D view is
+indistinguishable from a successful build, and the operator cannot tell whether
+labels are missing because of an API failure or because the run predates
+labeling.
+
+### 2026-08-18 Second proposal-failure episode was an invalid API key, distinct from the July credit exhaustion
+Decision: none required; the hardened pipeline behaved as designed and no code
+changed. Recorded because the failure mode is easily confused with the July one.
+Reasoning: "Propose crossovers" failed again with the verbatim error 401
+{"type":"error","error":{"type":"authentication_error","message":"API key is
+invalid."}} at stage proposer_llm. This is not the July 400 credit-balance error.
+A depleted balance returns 400 invalid_request_error naming the credit balance; a
+401 authentication_error means the key string is not recognized, which happens on
+rotation, revocation, or deletion. The distinction mattered in practice: credits
+had been restored and the run still failed, and the key in .env.local was
+confirmed rejected by a direct curl to api.anthropic.com that bypassed all
+application code. Consequences: the staged diagnostics did their job, naming the
+failing stage and carrying the upstream message verbatim instead of the old
+opaque "The proposal run could not complete", and external-service degradation
+(ConceptNet 502, Semantic Scholar 429) was recorded without blocking the run.
+Operational note: a running Next.js dev server holds the env from boot, so
+editing .env.local requires a restart before the new key takes effect.
 
 ### 2026-07-23 Crossover proposal pipeline hardened; root cause was API credit exhaustion
 Decision: rebuild proposeCrossovers as an explicitly staged pipeline (select_run,

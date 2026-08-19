@@ -491,3 +491,69 @@ export type WebLatest = {
   nodeBridges: { score: number; payload: { title: string; communities: number[] } }[];
   discoveries: WebDiscovery[];
 };
+
+// ---------------------------------------------------------------------------
+// Autonomous scheduler (Phase 1).
+// ---------------------------------------------------------------------------
+
+export type SchedulerTaskStatus = "queued" | "approved" | "deferred" | "rejected" | "executing" | "completed" | "failed";
+
+export type SchedulerTaskView = {
+  id: string;
+  kind: string;
+  scopeNames: string[];
+  priority: number;
+  costEstimateUsd: number;
+  costEstimateTokens: number;
+  status: SchedulerTaskStatus;
+  approvalRequired: boolean;
+  humanApprovalAt: string | null;
+  humanApprovalBy: string | null;
+  commandResult: {
+    reason?: string;
+    scopeNames?: string[];
+    stage?: string;
+    commands?: { ok: boolean; note: string }[];
+    elapsedMs?: number;
+    summary?: string | null;
+    error?: string | null;
+  } | null;
+  createdAt: string;
+  startedAt: string | null;
+  completedAt: string | null;
+};
+
+export type SchedulerStats = {
+  totalLibraries: number;
+  synthesizedLibraries: number;
+  librariesWithMetrics: number;
+  synthesisStale: number;
+  metricsMissing: number;
+  crossDomainMissing: number;
+  proposalsMissing: number;
+  apiFailures24h: number;
+};
+
+export type SchedulerLatest = {
+  config: { enabled: boolean; intervalMinutes: number };
+  run: {
+    id: string;
+    status: "awaiting_approval" | "executing" | "completed" | "failed";
+    detectionPassStart: string;
+    detectionPassEnd: string | null;
+    tasksQueued: number;
+    tasksApproved: number;
+    tasksExecuted: number;
+    tasksFailed: number;
+    stats: SchedulerStats | null;
+    notes: string | null;
+    createdAt: string;
+  } | null;
+  tasks: SchedulerTaskView[];
+  diagnostics: { id: string; kind: string; libraryName: string | null; details: Record<string, unknown> | null }[];
+};
+
+// The bot mirrors the scheduler's state: idle when nothing is happening,
+// thinking during detection, loading during execution, success/error on task
+// completion (held briefly, then back to idle).
+export type SchedulerBotState = "idle" | "thinking" | "loading" | "success" | "error";

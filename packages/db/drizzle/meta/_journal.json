@@ -127,6 +127,13 @@
       "when": 1784793176511,
       "tag": "0017_brave_captain_america",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1787100355846,
+      "tag": "0018_jazzy_blackheart",
+      "breakpoints": true
     }
   ]
 }

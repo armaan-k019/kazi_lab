@@ -950,6 +950,88 @@ export const webBridges = pgTable(
   (table) => [index("web_bridges_run_kind_score_idx").on(table.runId, table.kind, table.score)],
 );
 
+// ---------------------------------------------------------------------------
+// Autonomous scheduler (Phase 1): the lab detecting what to do. A scheduler run
+// is an immutable snapshot of one detection pass: what was found stale or
+// missing, what tasks were queued with conservative cost estimates, and what
+// happened to each task. Detection is deterministic TypeScript (no LLM); the
+// human approves every consequential task before execution.
+// ---------------------------------------------------------------------------
+
+export const schedulerRuns = pgTable("scheduler_runs", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  detectionPassStart: timestamp("detection_pass_start").notNull().defaultNow(),
+  detectionPassEnd: timestamp("detection_pass_end"),
+  // awaiting_approval | executing | completed | failed. Not in the original
+  // column spec but required by the approval workflow; documented deviation.
+  status: text("status").notNull().default("awaiting_approval"),
+  tasksQueued: integer("tasks_queued").notNull().default(0),
+  tasksApproved: integer("tasks_approved").notNull().default(0),
+  tasksExecuted: integer("tasks_executed").notNull().default(0),
+  tasksFailed: integer("tasks_failed").notNull().default(0),
+  // Corpus stats at detection time (total_libraries, synthesis_count, ...).
+  stats: jsonb("stats"),
+  notes: text("notes"),
+  error: text("error"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const schedulerTasks = pgTable(
+  "scheduler_tasks",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    runId: uuid("run_id")
+      .notNull()
+      .references(() => schedulerRuns.id, { onDelete: "cascade" }),
+    // extract_metrics | re_synthesize | re_critique | extract_cross_domain |
+    // propose_crossovers
+    kind: text("kind").notNull(),
+    // The library ids this task operates over (empty for corpus-level tasks
+    // like propose_crossovers).
+    scope: uuid("scope").array().notNull().default(sql`'{}'::uuid[]`),
+    priority: integer("priority").notNull(), // 1-10, higher = more urgent
+    // Conservative upper bounds, never asserted as precise.
+    costEstimateUsd: real("cost_estimate_usd").notNull(),
+    costEstimateTokens: integer("cost_estimate_tokens").notNull(),
+    // queued | approved | deferred | rejected | executing | completed | failed.
+    // deferred/rejected extend the original enum so the Approve/Defer/Reject
+    // controls have real states; documented deviation.
+    status: text("status").notNull().default("queued"),
+    approvalRequired: boolean("approval_required").notNull().default(true),
+    humanApprovalAt: timestamp("human_approval_at"),
+    humanApprovalBy: text("human_approval_by"), // note on why / who
+    // Output summary on completion, or { error, stage } on failure. Never the
+    // full verbose agent output.
+    commandResult: jsonb("command_result"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    startedAt: timestamp("started_at"),
+    completedAt: timestamp("completed_at"),
+  },
+  (table) => [index("scheduler_tasks_run_status_idx").on(table.runId, table.status)],
+);
+
+export const schedulerDiagnostics = pgTable("scheduler_diagnostics", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  runId: uuid("run_id")
+    .notNull()
+    .references(() => schedulerRuns.id, { onDelete: "cascade" }),
+  // stale_synthesis | missing_metrics | missing_cross_domain |
+  // missing_proposals | api_failure
+  diagnosticKind: text("diagnostic_kind").notNull(),
+  affectedLibraryId: uuid("affected_library_id").references(() => libraries.id, {
+    onDelete: "set null",
+  }),
+  details: jsonb("details"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export type SchedulerRun = typeof schedulerRuns.$inferSelect;
+export type NewSchedulerRun = typeof schedulerRuns.$inferInsert;
+export type SchedulerTask = typeof schedulerTasks.$inferSelect;
+export type NewSchedulerTask = typeof schedulerTasks.$inferInsert;
+export type SchedulerDiagnostic = typeof schedulerDiagnostics.$inferSelect;
+export type NewSchedulerDiagnostic = typeof schedulerDiagnostics.$inferInsert;
+
 export type WebBuildRun = typeof webBuildRuns.$inferSelect;
 export type NewWebBuildRun = typeof webBuildRuns.$inferInsert;
 export type WebCommunity = typeof webCommunities.$inferSelect;

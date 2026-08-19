@@ -9,13 +9,17 @@ import { CrossDomainView } from "@/components/cross-domain/cross-domain-view";
 import { ExperimentalistView } from "@/components/experimentalist/experimentalist-view";
 import { WriterView } from "@/components/writer/writer-view";
 import { WebView } from "@/components/web/web-view";
+import { SchedulerView } from "@/components/scheduler/scheduler-view";
+import { SchedulerBot } from "@/components/scheduler/scheduler-bot";
+import type { SchedulerBotState } from "@/lib/types";
 
 // Two primary sections. RESEARCH holds the four agents (per-library work, with
 // libraries as optional collections). DISCOVERY holds the corpus-wide research
-// web and cross-domain crossover discovery. Default landing is DISCOVERY.
+// web, cross-domain crossover discovery, and the autonomous scheduler.
+// Default landing is DISCOVERY.
 type Section = "research" | "discovery";
 type ResearchView = "scribe" | "critic" | "experimentalist" | "writer";
-type DiscoveryView = "web" | "cross-domain";
+type DiscoveryView = "web" | "cross-domain" | "scheduler";
 
 const RESEARCH_TABS: { id: ResearchView; name: string }[] = [
   { id: "scribe", name: "Scribe" },
@@ -26,15 +30,31 @@ const RESEARCH_TABS: { id: ResearchView; name: string }[] = [
 const DISCOVERY_TABS: { id: DiscoveryView; name: string }[] = [
   { id: "web", name: "Web" },
   { id: "cross-domain", name: "Cross-Domain" },
+  { id: "scheduler", name: "Scheduler" },
 ];
 
 export default function Home() {
   const [section, setSection] = useState<Section>("discovery");
   const [research, setResearch] = useState<ResearchView>("scribe");
   const [discovery, setDiscovery] = useState<DiscoveryView>("web");
+  // The bot mirrors scheduler activity; the Scheduler view drives it, and
+  // clicking the bot navigates to the Scheduler panel.
+  const [botState, setBotState] = useState<SchedulerBotState>("idle");
 
   return (
     <main className="mx-auto w-full max-w-5xl px-6 pb-32">
+      {/* The scheduler's face: fixed top-right, always visible. */}
+      <div className="fixed right-3 top-3 z-40 h-[92px] w-[92px]">
+        <SchedulerBot
+          state={botState}
+          size={92}
+          title={`scheduler: ${botState} (click to open)`}
+          onClick={() => {
+            setSection("discovery");
+            setDiscovery("scheduler");
+          }}
+        />
+      </div>
       <Header />
 
       {/* Primary section nav. */}
@@ -84,8 +104,10 @@ export default function Home() {
               research === "scribe" ? <ScribeView /> : research === "critic" ? <CriticView /> : research === "experimentalist" ? <ExperimentalistView /> : <WriterView />
             ) : discovery === "web" ? (
               <WebView />
-            ) : (
+            ) : discovery === "cross-domain" ? (
               <CrossDomainView />
+            ) : (
+              <SchedulerView onBotState={setBotState} />
             )}
           </motion.section>
         </AnimatePresence>

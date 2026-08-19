@@ -14,6 +14,7 @@
     "@kazi-lab/db": "workspace:*",
     "@kazi-lab/experimentalist": "workspace:*",
     "@kazi-lab/lab": "workspace:*",
+    "@kazi-lab/scheduler": "workspace:*",
     "@kazi-lab/scribe": "workspace:*",
     "@kazi-lab/web-graph": "workspace:*",
     "@kazi-lab/writer": "workspace:*",
