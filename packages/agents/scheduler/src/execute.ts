@@ -120,15 +120,97 @@ export type ExecutionReport = {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-// Execute every approved task on a run, sequentially, highest priority first.
-// Each task's status transition is transactional, so scheduler state is never
-// partial: a task is exactly one of approved, executing, completed, failed.
-// The agent runs themselves are immutable snapshots with their own
-// transactional writes; a failed task here cannot leave half an agent run
-// behind, and completed agent work is deliberately NOT rolled back when a
-// later task fails (undoing a finished, committed synthesis would destroy
-// real results; the honest record is per-task status plus run counters).
+// Stale-execution reaper: a task stuck in "executing" longer than its kind's
+// timeout plus this margin was orphaned by a crashed or killed process. It is
+// marked failed with a clear note so the queue can never be wedged forever.
+const STALE_EXECUTION_MARGIN_S = 900;
+
+// CONCURRENCY GUARD (database-level, not in memory). A task is claimed with a
+// conditional transition: UPDATE ... WHERE status = 'approved' RETURNING.
+// Exactly one concurrent caller can win the row; everyone else sees zero rows
+// returned and skips. This is what prevents the double-execution that hit run
+// b330c73d (a CLI run racing a UI click).
+export async function claimTask(taskId: string): Promise<boolean> {
+  const rows = await db
+    .update(schedulerTasks)
+    .set({ status: "executing", startedAt: new Date() })
+    .where(and(eq(schedulerTasks.id, taskId), eq(schedulerTasks.status, "approved")))
+    .returning({ id: schedulerTasks.id });
+  return rows.length > 0;
+}
+
+// Run status is DERIVED from task statuses, never set optimistically: a run
+// with any task still executing reports "executing" no matter which caller
+// finished its own list first. Pure function, unit-tested.
+export function deriveRunStatus(taskStatuses: string[]): "awaiting_approval" | "executing" | "completed" | "failed" {
+  if (taskStatuses.some((s) => s === "executing")) return "executing";
+  if (taskStatuses.some((s) => s === "queued" || s === "approved")) return "awaiting_approval";
+  const terminal = taskStatuses.filter((s) => s === "completed" || s === "failed");
+  if (terminal.length > 0 && terminal.every((s) => s === "failed")) return "failed";
+  return "completed";
+}
+
+// Recompute and persist a run's status and counters from its tasks.
+export async function syncRunStatus(runId: string): Promise<void> {
+  const tasks = await db
+    .select({ status: schedulerTasks.status })
+    .from(schedulerTasks)
+    .where(eq(schedulerTasks.runId, runId));
+  const statuses = tasks.map((t) => t.status);
+  await db
+    .update(schedulerRuns)
+    .set({
+      status: deriveRunStatus(statuses),
+      tasksExecuted: statuses.filter((s) => s === "completed").length,
+      tasksFailed: statuses.filter((s) => s === "failed").length,
+    })
+    .where(eq(schedulerRuns.id, runId));
+}
+
+// Mark tasks stuck in "executing" beyond their timeout as failed, then bring
+// their runs' derived status in step. Returns how many were reaped.
+export async function reapStaleExecutions(): Promise<number> {
+  const executing = await db.select().from(schedulerTasks).where(eq(schedulerTasks.status, "executing"));
+  const now = Date.now();
+  let reaped = 0;
+  const touchedRuns = new Set<string>();
+  for (const t of executing) {
+    const limitMs = (timeoutSecondsFor(t.kind as TaskKind) + STALE_EXECUTION_MARGIN_S) * 1_000;
+    const startedAt = t.startedAt?.getTime() ?? t.createdAt.getTime();
+    if (now - startedAt > limitMs) {
+      // Conditional again, so a task that just finished is not clobbered.
+      const rows = await db
+        .update(schedulerTasks)
+        .set({
+          status: "failed",
+          completedAt: new Date(),
+          commandResult: {
+            ...(t.commandResult && typeof t.commandResult === "object" ? t.commandResult : {}),
+            error: `stale execution reaped: still "executing" ${Math.round((now - startedAt) / 60_000)}m after start (limit ${Math.round(limitMs / 60_000)}m); the process likely crashed or was killed`,
+          },
+        })
+        .where(and(eq(schedulerTasks.id, t.id), eq(schedulerTasks.status, "executing")))
+        .returning({ id: schedulerTasks.id });
+      if (rows.length > 0) {
+        reaped += 1;
+        touchedRuns.add(t.runId);
+      }
+    }
+  }
+  for (const runId of touchedRuns) await syncRunStatus(runId);
+  return reaped;
+}
+
+// Execute the approved tasks on a run, sequentially, highest priority first.
+// Every task is CLAIMED via the conditional transition above, so concurrent
+// callers partition the work instead of duplicating it. The agent runs
+// themselves are immutable snapshots with their own transactional writes; a
+// failed task here cannot leave half an agent run behind, and completed agent
+// work is deliberately NOT rolled back when a later task fails (undoing a
+// finished, committed synthesis would destroy real results; the honest record
+// is per-task status plus run counters).
 export async function executeApprovedTasks(runIdArg?: string): Promise<ExecutionReport> {
+  await reapStaleExecutions();
   let runId = runIdArg;
   if (!runId) {
     const [latest] = await db
@@ -161,15 +243,18 @@ export async function executeApprovedTasks(runIdArg?: string): Promise<Execution
   const nameBy = new Map(nameRows.map((r) => [r.id, r.name]));
 
   const results: TaskExecutionResult[] = [];
-  for (let i = 0; i < approved.length; i++) {
-    const task = approved[i];
-    if (i > 0) await sleep(TASK_SPACING_MS);
+  let skippedByClaim = 0;
+  let ranAny = false;
+  for (const task of approved) {
+    // The conditional claim: only one concurrent caller wins this row.
+    if (!(await claimTask(task.id))) {
+      skippedByClaim += 1;
+      continue;
+    }
+    if (ranAny) await sleep(TASK_SPACING_MS);
+    ranAny = true;
     const scopeNames = task.scope.map((id) => nameBy.get(id) ?? id);
     const startedAt = new Date();
-    await db
-      .update(schedulerTasks)
-      .set({ status: "executing", startedAt })
-      .where(eq(schedulerTasks.id, task.id));
 
     const kind = task.kind as TaskKind;
     const commands = commandsForTask(kind, task.scope, scopeNames);
@@ -197,6 +282,18 @@ export async function executeApprovedTasks(runIdArg?: string): Promise<Execution
     const elapsedMs = completedAt.getTime() - startedAt.getTime();
     const status: "completed" | "failed" = failedNote ? "failed" : "completed";
     const summary = failedNote ? "" : lastTail.slice(-1_200);
+    // Machine-readable metric outcome, when the CLI printed one (see
+    // METRICS_OUTCOME_JSON in the scribe extract-metrics CLI): what was
+    // scanned, what was found, and why zero is zero.
+    const outcomeMatch = lastTail.match(/METRICS_OUTCOME_JSON:\s*(\{[^\n]*\})/);
+    let metricsOutcome: Record<string, unknown> | null = null;
+    if (outcomeMatch) {
+      try {
+        metricsOutcome = JSON.parse(outcomeMatch[1]) as Record<string, unknown>;
+      } catch {
+        metricsOutcome = null;
+      }
+    }
     await db
       .update(schedulerTasks)
       .set({
@@ -209,6 +306,7 @@ export async function executeApprovedTasks(runIdArg?: string): Promise<Execution
           elapsedMs,
           summary: summary || null,
           error: failedNote,
+          metricsOutcome,
         },
       })
       .where(eq(schedulerTasks.id, task.id));
@@ -225,21 +323,9 @@ export async function executeApprovedTasks(runIdArg?: string): Promise<Execution
 
   const executed = results.filter((r) => r.status === "completed").length;
   const failed = results.filter((r) => r.status === "failed").length;
-  // Tasks still queued (never approved) keep the run awaiting approval so the
-  // UI does not hide them behind a "completed" run.
-  const [stillQueued] = await db
-    .select({ id: schedulerTasks.id })
-    .from(schedulerTasks)
-    .where(and(eq(schedulerTasks.runId, runId), eq(schedulerTasks.status, "queued")))
-    .limit(1);
-  await db
-    .update(schedulerRuns)
-    .set({
-      status: stillQueued ? "awaiting_approval" : failed > 0 && executed === 0 ? "failed" : "completed",
-      tasksExecuted: executed,
-      tasksFailed: failed,
-    })
-    .where(eq(schedulerRuns.id, runId));
+  // Derived, never optimistic: if another caller is still executing tasks on
+  // this run, the run keeps reporting "executing".
+  await syncRunStatus(runId);
 
-  return { runId, executed, failed, skipped: 0, results };
+  return { runId, executed, failed, skipped: skippedByClaim, results };
 }

@@ -21,6 +21,7 @@ function lib(partial: Partial<LibrarySnapshot> & { id: string; name: string }): 
     papersAddedSinceSynthesis: 0,
     papersWithKeyTerms: 20,
     metricRowCount: 0,
+    latestMetricScan: null,
     ...partial,
   };
 }
@@ -176,6 +177,29 @@ test("api failures become diagnostics, never retry tasks", () => {
   assert.equal(r.stats.apiFailures24h, 1);
   // Same task count as the base fixture: no retry was queued.
   assert.equal(r.tasks.length, detectStaleStates(fixture(), 30).tasks.length);
+});
+
+test("a clean zero metric scan suppresses re-queuing and records why", () => {
+  const snap = fixture();
+  // lib-b has zero metric rows but was scanned cleanly: 20 papers processed,
+  // nothing skipped, nothing found. That is a result, not a to-do.
+  snap.libraries[1].latestMetricScan = { at: daysAgo(1), papersProcessed: 20, withMetrics: 0, skipped: 0 };
+  const r = detectStaleStates(snap, 30);
+  assert.ok(!r.tasks.some((t) => t.kind === "extract_metrics" && t.scope.includes("lib-b")));
+  const diag = r.diagnostics.find((d) => d.kind === "missing_metrics" && d.affectedLibraryId === "lib-b");
+  assert.ok(diag);
+  assert.equal(diag!.details.scanned, true);
+  assert.match(String(diag!.details.reason), /no extractable metrics/);
+});
+
+test("a scan with skipped papers does NOT suppress re-queuing (those papers owe a real attempt)", () => {
+  const snap = fixture();
+  // The generative-3d shape: every paper skipped by a systemic failure.
+  snap.libraries[1].latestMetricScan = { at: daysAgo(1), papersProcessed: 19, withMetrics: 0, skipped: 19 };
+  const r = detectStaleStates(snap, 30);
+  const task = r.tasks.find((t) => t.kind === "extract_metrics" && t.scope.includes("lib-b"));
+  assert.ok(task);
+  assert.match(task!.reason, /last scan skipped 19\/19/);
 });
 
 test("determinism: identical snapshots produce identical results", () => {

@@ -7,7 +7,7 @@ import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer
 import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
 import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
 import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
-import type { WebCommunity, WebGraphEdge, WebGraphNode } from "@/lib/types";
+import type { WebAbcCandidate, WebCommunity, WebGraphEdge, WebGraphNode } from "@/lib/types";
 
 // ---------------------------------------------------------------------------
 // All tuning constants centralized here per the codebase convention.
@@ -87,6 +87,20 @@ const LABEL_FADE_NEAR = 14; // camera closer than this to a centroid fades its l
 const LABEL_FADE_RANGE = 14;
 const LABEL_WORLD_HEIGHT = 3.2; // sprite height in world units
 
+// Orbit convention: grab-the-world (Rhino / Blender turntable / Google Earth
+// feel). Dragging left pushes the scene left; dragging up tips the top of the
+// scene toward the viewer. three.js's OrbitControls default is the opposite,
+// so both axes ship inverted. One line to flip back if the hands disagree.
+// OrbitControls cannot invert axes independently: if the two flags disagree,
+// the X flag wins and a console warning says so.
+const ORBIT_INVERT_X = true;
+const ORBIT_INVERT_Y = true;
+const ORBIT_ROTATE_SPEED = 0.9; // raise = faster orbit per pixel dragged
+// Right-drag pan already matches grab-the-world in three (the scene follows
+// the cursor); positive keeps that. Scroll-up zooms in; ZOOM_INVERT flips it.
+const PAN_SPEED = 1.0;
+const ZOOM_INVERT = false;
+
 // Interaction.
 const DAMPING_FACTOR = 0.06; // weighted, smooth orbit
 const IDLE_ROTATE_DELAY_MS = 5000; // idle time before auto-rotation engages
@@ -97,10 +111,52 @@ const RAY_POINT_THRESHOLD = 1.5; // raycast pick radius in world units
 const COMMUNITY_FRAME_DISTANCE = 3.2; // camera distance = extent x this when framing
 
 // Bloom: subtle. Threshold set so only bright additive cores bloom; the goal is
-// atmosphere, not a glare bath.
-const BLOOM_STRENGTH = 0.5;
+// atmosphere, not a glare bath. Strength breathes with lab activity but the
+// gain is deliberately small.
+const BLOOM_BASE = 0.5; // strength at zero activity
+const BLOOM_ACTIVITY_GAIN = 0.3; // extra strength at full activity; keep small
 const BLOOM_RADIUS = 0.55;
 const BLOOM_THRESHOLD = 0.6;
+
+// ---------------------------------------------------------------------------
+// LIVING BRAIN. Non-negotiable grounding rule: every pulse travels an edge
+// that exists in the drawn data, every cascade walks the real drawn-edge
+// adjacency (the same structure the ego-network uses), and every "thought"
+// traverses an actual ABC candidate's paper path. Nothing fires along a
+// connection that does not exist.
+// ---------------------------------------------------------------------------
+// Pulses: shader-driven bright packets sweeping along edges (uniform time +
+// per-edge random phase; zero extra draw calls).
+const PULSE_CYCLE_S = 7; // each edge gets one firing chance per cycle
+const PULSE_DENSITY_INTRA = 0.05; // fraction of intra edges firing per cycle; raise = busier
+const PULSE_DENSITY_BRIDGE = 0.3; // bridges pulse noticeably more (the interesting objects)
+const PULSE_WINDOW_FRAC = 0.22; // fraction of the cycle one sweep takes; lower = faster packets
+const PULSE_SIGMA = 0.07; // packet width along the edge; raise = softer, longer packet
+const PULSE_GAIN = 1.5; // packet brightness; raise = more fireworks
+
+// Spontaneous firing and cascades (idle brain activity). Degree-weighted node
+// picks, propagation strictly along the drawn adjacency.
+const FIRE_INTERVAL_S_MIN = 4; // band between spontaneous fires at activity 1
+const FIRE_INTERVAL_S_MAX = 9;
+const CASCADE_HOPS = 2; // how far a fire spreads through real neighbors
+const CASCADE_ATTENUATION = 0.45; // per-hop intensity multiplier
+const CASCADE_HOP_DELAY_MS = 260; // beat between hops
+const CASCADE_FLASH_DECAY = 1.6; // per-second decay of a node flash; raise = shorter blips
+const CASCADE_BASE_INTENSITY = 0.6; // root flash strength at activity 1
+const CASCADE_MAX_PENDING = 400; // hard cap on queued fires (fan-out backstop)
+
+// ABC "thoughts": the semantic showcase. A real candidate's A-leg papers
+// flash, then the A-to-C bridging edges illuminate, then the C-leg papers,
+// with a caption naming the chain. Idle playback cycles candidates
+// round-robin so every discovery gets airtime.
+const IDLE_THOUGHTS = true; // autonomous playback when nothing is selected
+const THOUGHT_INTERVAL_S = 16; // idle seconds between thoughts
+const THOUGHT_STAGE_S = 1.15; // duration of each stage (A, bridge, C)
+const THOUGHT_EDGE_BOOST = 2.4; // how strongly the chain's edges light up
+const THOUGHT_NODE_FLASH = 0.95; // how strongly the chain's papers flash
+
+// Activity floor when the scheduler is quiet; the portal never flatlines.
+const ACTIVITY_BASE = 0.15;
 
 // Background star dust: a faint field for parallax depth. Deterministic
 // (seeded) so the scene is stable across mounts. It counter-rotates very
@@ -242,12 +298,17 @@ const LINE_VERTEX = `
 attribute vec3 aColor;
 attribute float aAlpha;
 attribute float aGrad;
+attribute float aRand;
 varying vec3 vColor;
 varying float vAlpha;
 varying float vFog;
+varying float vPulse;
 uniform float uFogDensity;
 uniform float uDirGradient;
 uniform float uAlphaMult;
+uniform float uTime;
+uniform float uPulseDensity;
+uniform float uPulseGain;
 void main() {
   vColor = aColor;
   vec4 mv = modelViewMatrix * vec4(position, 1.0);
@@ -255,6 +316,14 @@ void main() {
   float prox = 1.0 + ${EDGE_PROX_BOOST.toFixed(2)} * exp(-depth / ${EDGE_PROX_FALLOFF.toFixed(1)});
   float dir = mix(1.0, mix(${DIR_GRADIENT_DIM.toFixed(2)}, ${DIR_GRADIENT_BRIGHT.toFixed(2)}, aGrad), uDirGradient);
   vAlpha = aAlpha * prox * dir * uAlphaMult;
+  // Signal pulse: once per cycle this edge MAY fire (hash gate scaled by
+  // uPulseDensity); when it does, a narrow gaussian packet sweeps from
+  // aGrad 0 to 1 (source to target on bridges). Pure shader; no meshes.
+  float cyc = floor(uTime / ${PULSE_CYCLE_S.toFixed(1)} + aRand);
+  float gate = step(fract(sin(cyc * 127.1 + aRand * 311.7) * 43758.5453), uPulseDensity);
+  float sweep = fract(uTime / ${PULSE_CYCLE_S.toFixed(1)} + aRand) / ${PULSE_WINDOW_FRAC.toFixed(2)};
+  float band = gate * (1.0 - step(1.0, sweep)) * exp(-pow((aGrad - sweep) / ${PULSE_SIGMA.toFixed(3)}, 2.0));
+  vPulse = band * uPulseGain;
   float f = uFogDensity * depth;
   vFog = exp(-f * f);
   gl_Position = projectionMatrix * mv;
@@ -264,8 +333,11 @@ const LINE_FRAGMENT = `
 varying vec3 vColor;
 varying float vAlpha;
 varying float vFog;
+varying float vPulse;
 void main() {
-  gl_FragColor = vec4(vColor * vAlpha * vFog, vAlpha * vFog);
+  float a = min(1.0, vAlpha * (1.0 + vPulse) + 0.06 * vPulse);
+  vec3 col = vColor * (1.0 + 0.9 * vPulse);
+  gl_FragColor = vec4(col * a * vFog, a * vFog);
 }
 `;
 
@@ -281,18 +353,55 @@ type SceneApi = {
   setSelection(refId: string | null, expand: boolean): void;
   setLegendEmphasis(community: number | null, isolate: boolean): void;
   resetView(): void;
+  playThought(index: number): void;
+  fireLibraryCascade(libraryId: string): void;
 };
+
+// The externally exposed slice of the scene API (Discoveries hover/click,
+// scheduler-driven cascades, and the shell's shared-selection clearing).
+export type PortalApi = {
+  playThought(index: number): void;
+  fireLibraryCascade(libraryId: string): void;
+  clearSelection(): void;
+  // Cross-tab continuity: softly emphasize one library's papers (partial dim
+  // on non-members); null clears. A highlight, never a camera move.
+  emphasizeLibrary(libraryId: string | null): void;
+};
+
+// How strongly non-members dim under a library emphasis (0 = none, 1 = full).
+const LIBRARY_EMPHASIS_DIM = 0.45;
 
 export function WebGraph3D({
   nodes,
   edges,
   communities,
+  abc = [],
+  activity = ACTIVITY_BASE,
+  fillParent = false,
+  fullscreenTarget,
   onSelect,
+  onSelectionChange,
+  registerApi,
+  onThoughtCaptionClick,
 }: {
   nodes: WebGraphNode[];
   edges: WebGraphEdge[];
   communities: WebCommunity[];
+  abc?: WebAbcCandidate[];
+  // 0..1, derived from real scheduler state (idle / executing / just done).
+  activity?: number;
+  // Fill the parent's height (the shell sizes the portal region) instead of
+  // the fixed standalone HEIGHT.
+  fillParent?: boolean;
+  // Optional element to fullscreen instead of this component's wrapper, so
+  // the shell can keep its panel dock visible as an overlay in fullscreen.
+  fullscreenTarget?: React.RefObject<HTMLElement | null>;
   onSelect: (refId: string) => void;
+  // Shared-selection wiring: fires with the selected paper's refId (ego
+  // network click) or null when the selection clears.
+  onSelectionChange?: (refId: string | null) => void;
+  registerApi?: (api: PortalApi | null) => void;
+  onThoughtCaptionClick?: (index: number) => void;
 }) {
   const mountRef = useRef<HTMLDivElement | null>(null);
   const wrapperRef = useRef<HTMLDivElement | null>(null); // fullscreen element
@@ -303,12 +412,21 @@ export function WebGraph3D({
   const [showClouds, setShowClouds] = useState(true); // community clouds ON by default
   const [showArrows, setShowArrows] = useState(false); // bridge direction arrows OFF by default
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [devOpen, setDevOpen] = useState(false); // dev tuning popover (dev builds only)
   const [selected, setSelected] = useState<string | null>(null);
   const [isolated, setIsolated] = useState<number | null>(null);
   const [drawnEdgeCounts, setDrawnEdgeCounts] = useState<{ intra: number; bridge: number } | null>(null);
-  // Keep a stable ref to the click handler so the scene never captures stale props.
+  // The caption of the thought currently playing (null when idle).
+  const [thoughtCaption, setThoughtCaption] = useState<{ index: number; label: string } | null>(null);
+  // Keep stable refs so the scene never captures stale props.
   const onSelectRef = useRef(onSelect);
   onSelectRef.current = onSelect;
+  const activityRef = useRef(activity);
+  activityRef.current = Math.min(1, Math.max(0, activity));
+  const onThoughtCaptionClickRef = useRef(onThoughtCaptionClick);
+  onThoughtCaptionClickRef.current = onThoughtCaptionClick;
+  const onSelectionChangeRef = useRef(onSelectionChange);
+  onSelectionChangeRef.current = onSelectionChange;
 
   // Only papers that have coordinates can be placed.
   const placed = useMemo(() => nodes.filter((n) => n.x !== null && n.y !== null && n.z !== null && n.refId), [nodes]);
@@ -340,13 +458,20 @@ export function WebGraph3D({
     composer.setPixelRatio(Math.min(window.devicePixelRatio, PIXEL_RATIO_CAP));
     composer.setSize(width, height);
     composer.addPass(new RenderPass(scene, camera));
-    const bloom = new UnrealBloomPass(new THREE.Vector2(width, height), BLOOM_STRENGTH, BLOOM_RADIUS, BLOOM_THRESHOLD);
+    const bloom = new UnrealBloomPass(new THREE.Vector2(width, height), BLOOM_BASE, BLOOM_RADIUS, BLOOM_THRESHOLD);
     composer.addPass(bloom);
     composer.addPass(new OutputPass());
 
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
     controls.dampingFactor = DAMPING_FACTOR;
+    // Grab-the-world orbit (see the ORBIT_INVERT constants above).
+    if (ORBIT_INVERT_X !== ORBIT_INVERT_Y) {
+      console.warn("web-graph-3d: OrbitControls cannot invert axes independently; ORBIT_INVERT_X wins.");
+    }
+    controls.rotateSpeed = ORBIT_ROTATE_SPEED * (ORBIT_INVERT_X ? -1 : 1);
+    controls.panSpeed = PAN_SPEED;
+    controls.zoomSpeed = ZOOM_INVERT ? -1 : 1;
 
     // -----------------------------------------------------------------------
     // Layout: normalize coordinates to a centered cube.
@@ -402,6 +527,7 @@ export function WebGraph3D({
       depthTest: true,
     });
     const points = new THREE.Points(pointGeo, pointMat);
+    points.renderOrder = 3; // pulses and points read on top of the clouds
     scene.add(points);
 
     // -----------------------------------------------------------------------
@@ -479,8 +605,13 @@ export function WebGraph3D({
     const intraCol = new Float32Array(intraVertCount * 3);
     const intraBaseAlpha = new Float32Array(intraVertCount);
     const intraAlpha = new Float32Array(intraVertCount);
+    const intraGrad = new Float32Array(intraVertCount);
+    const intraRand = new Float32Array(intraVertCount);
+    // Deterministic per-edge phase so the pulse schedule is stable per build.
+    const pulseRng = mulberry32(31337);
     drawnIntra.forEach((e, k) => {
       const w = INTRA_ALPHA * (0.5 + 0.5 * (e.weight / maxWeight));
+      const r = pulseRng();
       for (const [slot, idx] of [[0, e.a], [1, e.b]] as const) {
         const v = k * 2 + slot;
         intraPos[v * 3] = pos[idx].x;
@@ -492,19 +623,30 @@ export function WebGraph3D({
         intraCol[v * 3 + 2] = tmpColor.b;
         intraBaseAlpha[v] = w;
         intraAlpha[v] = w;
+        // aGrad runs 0..1 along the segment so a pulse can sweep it. The
+        // direction cue stays off for intra edges (uDirGradient 0).
+        intraGrad[v] = slot;
+        intraRand[v] = r;
       }
     });
     const intraGeo = new THREE.BufferGeometry();
     intraGeo.setAttribute("position", new THREE.BufferAttribute(intraPos, 3));
     intraGeo.setAttribute("aColor", new THREE.BufferAttribute(intraCol, 3));
     intraGeo.setAttribute("aAlpha", new THREE.BufferAttribute(intraAlpha, 1));
-    // Neutral gradient position: intra edges never carry the direction cue.
-    intraGeo.setAttribute("aGrad", new THREE.BufferAttribute(new Float32Array(intraVertCount).fill(0.5), 1));
+    intraGeo.setAttribute("aGrad", new THREE.BufferAttribute(intraGrad, 1));
+    intraGeo.setAttribute("aRand", new THREE.BufferAttribute(intraRand, 1));
     const makeLineMat = () =>
       new THREE.ShaderMaterial({
         vertexShader: LINE_VERTEX,
         fragmentShader: LINE_FRAGMENT,
-        uniforms: { uFogDensity: { value: FOG_DENSITY }, uDirGradient: { value: 0 }, uAlphaMult: { value: 1 } },
+        uniforms: {
+          uFogDensity: { value: FOG_DENSITY },
+          uDirGradient: { value: 0 },
+          uAlphaMult: { value: 1 },
+          uTime: { value: 0 },
+          uPulseDensity: { value: 0 },
+          uPulseGain: { value: PULSE_GAIN },
+        },
         transparent: true,
         blending: THREE.AdditiveBlending,
         depthWrite: false,
@@ -512,6 +654,7 @@ export function WebGraph3D({
     const intraMat = makeLineMat();
     const bridgeMat = makeLineMat(); // separate instance: the direction cue and dev tuning act on bridges only
     const intraLines = new THREE.LineSegments(intraGeo, intraMat);
+    intraLines.renderOrder = 2; // above the clouds, below the points
     scene.add(intraLines);
 
     // Bridge segments: gentle bezier arcs (sampled), warm color, brighter.
@@ -530,6 +673,7 @@ export function WebGraph3D({
     const bridgeBaseAlpha = new Float32Array(bridgeVertCount);
     const bridgeAlpha = new Float32Array(bridgeVertCount);
     const bridgeGrad = new Float32Array(bridgeVertCount);
+    const bridgeRand = new Float32Array(bridgeVertCount);
     const bridgeColor = new THREE.Color(BRIDGE_COLOR);
     const va = new THREE.Vector3();
     const vb = new THREE.Vector3();
@@ -549,6 +693,7 @@ export function WebGraph3D({
       const samples = curve.getPoints(segsPerBridge);
       const w = BRIDGE_ALPHA * (0.55 + 0.45 * (e.weight / maxWeight));
       const towardB = (graphDegree.get(e.b) ?? 0) >= (graphDegree.get(e.a) ?? 0);
+      const r = pulseRng();
       for (let s = 0; s < segsPerBridge; s++) {
         for (const [slot, p] of [[0, samples[s]], [1, samples[s + 1]]] as const) {
           const v = (k * segsPerBridge + s) * 2 + slot;
@@ -562,6 +707,7 @@ export function WebGraph3D({
           bridgeAlpha[v] = w;
           const t = (s + slot) / segsPerBridge;
           bridgeGrad[v] = towardB ? t : 1 - t;
+          bridgeRand[v] = r;
         }
       }
     });
@@ -570,7 +716,9 @@ export function WebGraph3D({
     bridgeGeo.setAttribute("aColor", new THREE.BufferAttribute(bridgeCol, 3));
     bridgeGeo.setAttribute("aAlpha", new THREE.BufferAttribute(bridgeAlpha, 1));
     bridgeGeo.setAttribute("aGrad", new THREE.BufferAttribute(bridgeGrad, 1));
+    bridgeGeo.setAttribute("aRand", new THREE.BufferAttribute(bridgeRand, 1));
     const bridgeLines = new THREE.LineSegments(bridgeGeo, bridgeMat);
+    bridgeLines.renderOrder = 2;
     scene.add(bridgeLines);
 
     // -----------------------------------------------------------------------
@@ -622,6 +770,7 @@ export function WebGraph3D({
           depthWrite: false,
         });
         const sprite = new THREE.Sprite(mat);
+        sprite.renderOrder = 1; // clouds sit UNDER edges and points
         sprite.raycast = () => {}; // purely visual, never pickable
         const jitter = new THREE.Vector3(rng() * 2 - 1, rng() * 2 - 1, rng() * 2 - 1).multiplyScalar(extent * CLOUD_JITTER);
         const basePos = center.clone().add(jitter);
@@ -673,6 +822,14 @@ export function WebGraph3D({
     let selectedRoot = -1;
     let legendCommunity: number | null = null;
     let legendIsolate = false;
+    let libraryEmphasis: string | null = null; // cross-tab: soft library highlight
+
+    // Baselines: the emphasis state (selection/legend/hover) writes here; the
+    // living-brain layers (cascade flashes, thought boosts) compose ON TOP of
+    // these per frame without disturbing them.
+    const baseHighlights = new Float32Array(n);
+    const baselineIntraAlpha = new Float32Array(intraVertCount);
+    const baselineBridgeAlpha = new Float32Array(bridgeVertCount);
 
     const applyVisualState = () => {
       const hAttr = pointGeo.getAttribute("aHighlight") as THREE.BufferAttribute;
@@ -687,8 +844,12 @@ export function WebGraph3D({
         } else if (legendCommunity !== null) {
           const member = placed[i].community === legendCommunity;
           if (!member) dim = legendIsolate ? 1 : LEGEND_HOVER_DIM;
+        } else if (libraryEmphasis !== null) {
+          // Soft cross-tab emphasis: never a full hide, never a camera move.
+          if (!placed[i].libraryIds?.includes(libraryEmphasis)) dim = LIBRARY_EMPHASIS_DIM;
         }
         if (i === hoveredIndex) hi = Math.max(hi, 1);
+        baseHighlights[i] = hi;
         highlights[i] = hi;
         dims[i] = dim;
       }
@@ -696,7 +857,7 @@ export function WebGraph3D({
       dAttr.needsUpdate = true;
 
       // Edge alphas follow the same emphasis.
-      const applyEdgeAlpha = (drawn: DrawnEdge[], base: Float32Array, out: Float32Array, attr: THREE.BufferAttribute, vertsPer: number) => {
+      const applyEdgeAlpha = (drawn: DrawnEdge[], base: Float32Array, out: Float32Array, baseline: Float32Array, attr: THREE.BufferAttribute, vertsPer: number) => {
         drawn.forEach((e, k) => {
           let factor = 1;
           if (selectedSet) {
@@ -709,12 +870,16 @@ export function WebGraph3D({
             const touches = placed[e.a].community === legendCommunity || placed[e.b].community === legendCommunity;
             factor = member ? 1.4 : touches ? 0.7 : legendIsolate ? 0.08 : 0.35;
           }
-          for (let s = 0; s < vertsPer; s++) out[k * vertsPer + s] = base[k * vertsPer + s] * factor;
+          for (let s = 0; s < vertsPer; s++) {
+            const v = k * vertsPer + s;
+            out[v] = base[v] * factor;
+            baseline[v] = out[v];
+          }
         });
         attr.needsUpdate = true;
       };
-      applyEdgeAlpha(drawnIntra, intraBaseAlpha, intraAlpha, intraGeo.getAttribute("aAlpha") as THREE.BufferAttribute, 2);
-      applyEdgeAlpha(drawnBridges, bridgeBaseAlpha, bridgeAlpha, bridgeGeo.getAttribute("aAlpha") as THREE.BufferAttribute, segsPerBridge * 2);
+      applyEdgeAlpha(drawnIntra, intraBaseAlpha, intraAlpha, baselineIntraAlpha, intraGeo.getAttribute("aAlpha") as THREE.BufferAttribute, 2);
+      applyEdgeAlpha(drawnBridges, bridgeBaseAlpha, bridgeAlpha, baselineBridgeAlpha, bridgeGeo.getAttribute("aAlpha") as THREE.BufferAttribute, segsPerBridge * 2);
     };
 
     // -----------------------------------------------------------------------
@@ -796,6 +961,7 @@ export function WebGraph3D({
       applyVisualState();
       easeCameraTo(pos[selectedRoot], null);
       setSelected(placed[selectedRoot].refId);
+      onSelectionChangeRef.current?.(placed[selectedRoot].refId);
       setIsolated(null);
     };
     const clearSelection = () => {
@@ -803,6 +969,7 @@ export function WebGraph3D({
       selectedRoot = -1;
       applyVisualState();
       setSelected(null);
+      onSelectionChangeRef.current?.(null);
     };
 
     let downAt = { x: 0, y: 0 };
@@ -823,6 +990,110 @@ export function WebGraph3D({
     renderer.domElement.addEventListener("pointerdown", onPointerDown);
     renderer.domElement.addEventListener("click", onClick);
     renderer.domElement.addEventListener("dblclick", onDblClick);
+
+    // -----------------------------------------------------------------------
+    // LIVING BRAIN ENGINES. Grounding enforcement, by construction:
+    //  - node indices only ever come from indexByRef lookups on real refIds;
+    //  - cascades propagate exclusively through `adjacency`, the drawn-edge
+    //    structure the ego-network uses;
+    //  - thought stages only illuminate edges found in drawnIntra or
+    //    drawnBridges by endpoint membership; a connection that is not drawn
+    //    simply does not light.
+    // -----------------------------------------------------------------------
+    const flash = new Float32Array(n); // per-node cascade/thought flash, decays per frame
+    let flashDirty = false;
+    type FireEvent = { at: number; index: number; intensity: number; hop: number };
+    let pendingFires: FireEvent[] = [];
+    const fireRng = mulberry32(90210);
+    // Degree-weighted spontaneous pick: cumulative weights over placed nodes.
+    const degreeWeights = new Float32Array(n);
+    {
+      let acc = 0;
+      for (let i = 0; i < n; i++) {
+        acc += 1 + (graphDegree.get(i) ?? 0);
+        degreeWeights[i] = acc;
+      }
+    }
+    const pickWeightedNode = (): number => {
+      const r = fireRng() * degreeWeights[n - 1];
+      let lo = 0;
+      let hi = n - 1;
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        if (degreeWeights[mid] < r) lo = mid + 1;
+        else hi = mid;
+      }
+      return lo;
+    };
+    const scheduleFire = (index: number, intensity: number) => {
+      if (pendingFires.length < CASCADE_MAX_PENDING) pendingFires.push({ at: performance.now(), index, intensity, hop: 0 });
+    };
+    let nextFireAt = performance.now() + 2500;
+
+    // ABC thought chains, parsed once from the real candidates. Chains with no
+    // resolvable papers in the projection are dropped (never faked).
+    type Chain = { index: number; label: string; aIdx: number[]; cIdx: number[] };
+    const chains: Chain[] = [];
+    abc.forEach((cand, i) => {
+      const aIds = new Set<string>();
+      const cIds = new Set<string>();
+      for (const pth of cand.payload.path_evidence ?? []) {
+        for (const p of pth.a_leg_papers) if (p.id) aIds.add(p.id);
+        for (const p of pth.c_leg_papers) if (p.id) cIds.add(p.id);
+      }
+      const aIdx = [...aIds].map((id) => indexByRef.get(id)).filter((x): x is number => x !== undefined);
+      const cIdx = [...cIds].map((id) => indexByRef.get(id)).filter((x): x is number => x !== undefined);
+      if (aIdx.length === 0 || cIdx.length === 0) return;
+      const b = cand.payload.path_evidence?.[0]?.b_label ?? "?";
+      chains.push({ index: i, label: `${cand.payload.a_label} -> ${b} -> ${cand.payload.c_label}`, aIdx, cIdx });
+    });
+
+    // Per-chain stage edges, resolved lazily against the DRAWN edge lists.
+    type StageEdges = { intra: number[]; bridge: number[] };
+    const chainEdgeCache = new Map<number, StageEdges[]>();
+    const stageEdgesFor = (chain: Chain): StageEdges[] => {
+      const cached = chainEdgeCache.get(chain.index);
+      if (cached) return cached;
+      const aSet = new Set(chain.aIdx);
+      const cSet = new Set(chain.cIdx);
+      const stages: StageEdges[] = [
+        { intra: [], bridge: [] }, // stage 0: edges among the A-leg papers
+        { intra: [], bridge: [] }, // stage 1: edges bridging A-leg to C-leg
+        { intra: [], bridge: [] }, // stage 2: edges among the C-leg papers
+      ];
+      const collect = (drawn: DrawnEdge[], into: (stage: number, k: number) => void) => {
+        drawn.forEach((e, k) => {
+          const inA = aSet.has(e.a) && aSet.has(e.b);
+          const cross = (aSet.has(e.a) && cSet.has(e.b)) || (cSet.has(e.a) && aSet.has(e.b));
+          const inC = cSet.has(e.a) && cSet.has(e.b);
+          if (inA) into(0, k);
+          if (cross) into(1, k);
+          if (inC) into(2, k);
+        });
+      };
+      collect(drawnIntra, (st, k) => stages[st].intra.push(k));
+      collect(drawnBridges, (st, k) => stages[st].bridge.push(k));
+      chainEdgeCache.set(chain.index, stages);
+      return stages;
+    };
+
+    type ActiveThought = { chain: Chain; stages: StageEdges[]; stage: number; stageStart: number };
+    let activeThought: ActiveThought | null = null;
+    let thoughtEdgesDirty = false; // restore pass needed after a thought ends
+    let thoughtRR = 0; // round-robin cursor so every discovery gets airtime
+    let nextThoughtAt = performance.now() + 6000;
+
+    const startThought = (chainPos: number) => {
+      if (chains.length === 0) return;
+      const chain = chains[((chainPos % chains.length) + chains.length) % chains.length];
+      activeThought = { chain, stages: stageEdgesFor(chain), stage: 0, stageStart: performance.now() };
+      setThoughtCaption({ index: chain.index, label: chain.label });
+    };
+    const endThought = () => {
+      activeThought = null;
+      thoughtEdgesDirty = true;
+      setThoughtCaption(null);
+    };
 
     // -----------------------------------------------------------------------
     // Imperative API for React-side controls (toggles, legend, reset).
@@ -882,7 +1153,40 @@ export function WebGraph3D({
         setIsolated(null);
         easeCameraTo(defaultTarget, defaultPos);
       },
+      playThought(index: number) {
+        if (reducedMotion) return;
+        const chainPos = chains.findIndex((c) => c.index === index);
+        if (chainPos >= 0) {
+          startThought(chainPos);
+          nextThoughtAt = performance.now() + THOUGHT_INTERVAL_S * 1000;
+        }
+      },
+      fireLibraryCascade(libraryId: string) {
+        if (reducedMotion) return;
+        // Grounded: seed at the highest-degree REAL member of that library.
+        let seed = -1;
+        let best = -1;
+        for (let i = 0; i < n; i++) {
+          if (!placed[i].libraryIds?.includes(libraryId)) continue;
+          const d = graphDegree.get(i) ?? 0;
+          if (d > best) {
+            best = d;
+            seed = i;
+          }
+        }
+        if (seed >= 0) scheduleFire(seed, 1.0);
+      },
     };
+    const setLibraryEmphasis = (libraryId: string | null) => {
+      libraryEmphasis = libraryId;
+      applyVisualState();
+    };
+    registerApi?.({
+      playThought: (i) => apiRef.current?.playThought(i),
+      fireLibraryCascade: (id) => apiRef.current?.fireLibraryCascade(id),
+      clearSelection: () => apiRef.current?.setSelection(null, false),
+      emphasizeLibrary: setLibraryEmphasis,
+    });
 
     // -----------------------------------------------------------------------
     // Animation loop. No per-frame allocations (temps reused above).
@@ -957,6 +1261,113 @@ export function WebGraph3D({
       // parallax depth cue. Static under prefers-reduced-motion.
       if (!reducedMotion) stars.rotation.y -= STAR_COUNTER_ROTATE * dt;
 
+      // ---------------------------------------------------------------------
+      // LIVING BRAIN, per frame. Everything below walks real structure only.
+      // ---------------------------------------------------------------------
+      const level = Math.min(1, Math.max(0, activityRef.current));
+      intraMat.uniforms.uTime.value = nowT / 1000;
+      bridgeMat.uniforms.uTime.value = nowT / 1000;
+      intraMat.uniforms.uPulseDensity.value = reducedMotion ? 0 : PULSE_DENSITY_INTRA * (0.3 + 1.4 * level);
+      bridgeMat.uniforms.uPulseDensity.value = reducedMotion ? 0 : PULSE_DENSITY_BRIDGE * (0.3 + 1.4 * level);
+      bloom.strength = BLOOM_BASE + BLOOM_ACTIVITY_GAIN * level;
+
+      if (!reducedMotion) {
+        // Spontaneous firing: degree-weighted node picks on a seeded schedule,
+        // more frequent at higher activity.
+        if (nowT >= nextFireAt) {
+          scheduleFire(pickWeightedNode(), CASCADE_BASE_INTENSITY * (0.5 + 0.8 * level));
+          const span = FIRE_INTERVAL_S_MIN + fireRng() * (FIRE_INTERVAL_S_MAX - FIRE_INTERVAL_S_MIN);
+          nextFireAt = nowT + (span / (0.5 + level)) * 1000;
+        }
+        // Cascade propagation strictly along the drawn adjacency.
+        if (pendingFires.length > 0) {
+          const due = pendingFires.filter((f) => f.at <= nowT);
+          if (due.length > 0) {
+            pendingFires = pendingFires.filter((f) => f.at > nowT);
+            for (const f of due) {
+              flash[f.index] = Math.max(flash[f.index], f.intensity);
+              flashDirty = true;
+              if (f.hop < CASCADE_HOPS) {
+                for (const nb of adjacency.get(f.index) ?? []) {
+                  if (pendingFires.length >= CASCADE_MAX_PENDING) break;
+                  pendingFires.push({ at: nowT + CASCADE_HOP_DELAY_MS, index: nb, intensity: f.intensity * CASCADE_ATTENUATION, hop: f.hop + 1 });
+                }
+              }
+            }
+          }
+        }
+
+        // Idle thoughts: round-robin through the REAL ABC chains when nothing
+        // else is going on, so every discovery gets airtime.
+        if (IDLE_THOUGHTS && chains.length > 0 && !activeThought && !selectedSet && nowT >= nextThoughtAt) {
+          startThought(thoughtRR++);
+          nextThoughtAt = nowT + THOUGHT_INTERVAL_S * 1000;
+        }
+
+        // Thought playback: A-leg papers, then the bridging edges, then the
+        // C-leg papers, each stage easing in and out.
+        if (activeThought) {
+          const el = (nowT - activeThought.stageStart) / (THOUGHT_STAGE_S * 1000);
+          if (el >= 1) {
+            activeThought.stage += 1;
+            activeThought.stageStart = nowT;
+            if (activeThought.stage > 2) endThought();
+          }
+          if (activeThought) {
+            const p = Math.min(1, (nowT - activeThought.stageStart) / (THOUGHT_STAGE_S * 1000));
+            const envelope = Math.sin(Math.PI * p); // ease in and out
+            const st = activeThought.stage;
+            const nodesInStage = st === 0 ? activeThought.chain.aIdx : st === 2 ? activeThought.chain.cIdx : [...activeThought.chain.aIdx, ...activeThought.chain.cIdx];
+            const strength = st === 1 ? THOUGHT_NODE_FLASH * 0.45 : THOUGHT_NODE_FLASH;
+            for (const i of nodesInStage) flash[i] = Math.max(flash[i], strength * envelope);
+            flashDirty = true;
+
+            // Edge illumination for this stage, over baseline alphas.
+            const stageEdges = activeThought.stages[st];
+            const boost = THOUGHT_EDGE_BOOST * envelope;
+            const iAttr = intraGeo.getAttribute("aAlpha") as THREE.BufferAttribute;
+            const bAttr = bridgeGeo.getAttribute("aAlpha") as THREE.BufferAttribute;
+            intraAlpha.set(baselineIntraAlpha);
+            bridgeAlpha.set(baselineBridgeAlpha);
+            for (const k of stageEdges.intra) {
+              for (let s = 0; s < 2; s++) intraAlpha[k * 2 + s] = Math.min(1, baselineIntraAlpha[k * 2 + s] * (1 + boost) + 0.05 * envelope);
+            }
+            const vertsPer = segsPerBridge * 2;
+            for (const k of stageEdges.bridge) {
+              for (let s = 0; s < vertsPer; s++) bridgeAlpha[k * vertsPer + s] = Math.min(1, baselineBridgeAlpha[k * vertsPer + s] * (1 + boost) + 0.05 * envelope);
+            }
+            iAttr.needsUpdate = true;
+            bAttr.needsUpdate = true;
+            thoughtEdgesDirty = true;
+          }
+        } else if (thoughtEdgesDirty) {
+          // One restore pass after a thought ends.
+          intraAlpha.set(baselineIntraAlpha);
+          bridgeAlpha.set(baselineBridgeAlpha);
+          (intraGeo.getAttribute("aAlpha") as THREE.BufferAttribute).needsUpdate = true;
+          (bridgeGeo.getAttribute("aAlpha") as THREE.BufferAttribute).needsUpdate = true;
+          thoughtEdgesDirty = false;
+        }
+
+        // Node flash decay and composition over the emphasis baseline.
+        if (flashDirty) {
+          const hAttr = pointGeo.getAttribute("aHighlight") as THREE.BufferAttribute;
+          let any = false;
+          const decay = Math.exp(-CASCADE_FLASH_DECAY * dt);
+          for (let i = 0; i < n; i++) {
+            if (flash[i] > 0.01) {
+              flash[i] *= decay;
+              any = true;
+            } else {
+              flash[i] = 0;
+            }
+            highlights[i] = Math.max(baseHighlights[i], flash[i]);
+          }
+          hAttr.needsUpdate = true;
+          if (!any && pendingFires.length === 0 && !activeThought) flashDirty = false;
+        }
+      }
+
       controls.update();
       composer.render();
     };
@@ -1024,6 +1435,7 @@ export function WebGraph3D({
       composer.dispose();
       renderer.dispose();
       apiRef.current = null;
+      registerApi?.(null);
       if (renderer.domElement.parentNode === mount) mount.removeChild(renderer.domElement);
     };
     // communities/commLabel change only with a new run payload (nodes change too).
@@ -1052,7 +1464,7 @@ export function WebGraph3D({
     if (document.fullscreenElement) {
       void document.exitFullscreen();
     } else {
-      void wrapperRef.current?.requestFullscreen();
+      void (fullscreenTarget?.current ?? wrapperRef.current)?.requestFullscreen();
     }
   };
 
@@ -1079,80 +1491,77 @@ export function WebGraph3D({
   }
 
   return (
-    <div ref={wrapperRef} className="relative" style={isFullscreen ? { backgroundColor: "#0b0d10" } : undefined}>
-      <div ref={mountRef} className={`relative w-full overflow-hidden ${isFullscreen ? "" : "rounded-lg"}`} style={{ height: isFullscreen ? "100vh" : HEIGHT }}>
+    <div
+      ref={wrapperRef}
+      className={`relative ${fillParent ? "h-full" : ""}`}
+      style={isFullscreen ? { backgroundColor: "#0b0d10" } : undefined}
+    >
+      <div
+        ref={mountRef}
+        className={`relative w-full overflow-hidden ${isFullscreen ? "" : "rounded-lg"}`}
+        style={{ height: fillParent ? "100%" : isFullscreen ? "100vh" : HEIGHT }}
+      >
         {/* Vignette: DOM overlay, zero GPU cost in-scene. */}
         <div className="pointer-events-none absolute inset-0 z-10" style={{ background: "radial-gradient(ellipse at center, transparent 55%, rgba(4,6,8,0.55) 100%)" }} />
+        {/* The thought caption: which REAL ABC chain is playing right now.
+            Clicking opens that candidate in the Discoveries list. */}
+        {thoughtCaption && (
+          <button
+            type="button"
+            onClick={() => onThoughtCaptionClickRef.current?.(thoughtCaption.index)}
+            className="absolute bottom-3 left-1/2 z-20 -translate-x-1/2 rounded-lg border border-border bg-surface/80 px-3 py-1.5 text-left font-mono text-[11px] text-text-secondary backdrop-blur-sm transition-colors hover:border-accent/40 hover:text-accent"
+          >
+            <span className="mr-1.5 text-text-muted">thinking:</span>
+            {thoughtCaption.label}
+          </button>
+        )}
       </div>
 
-      {/* Fullscreen affordances: an enter button over the canvas; in
-          fullscreen, only minimal controls (reset + exit) and the Esc hint. */}
-      {!isFullscreen && (
-        <button type="button" onClick={toggleFullscreen} className="absolute right-2 top-2 z-20 rounded border border-border bg-surface/80 px-2 py-0.5 text-[11px] text-text-secondary transition-colors hover:border-accent/40 hover:text-accent">
-          fullscreen
-        </button>
-      )}
-      {isFullscreen && (
-        <div className="absolute right-3 top-3 z-20 flex items-center gap-2">
-          <span className="rounded bg-surface/70 px-2 py-0.5 text-[11px] text-text-muted">Esc to exit</span>
-          <button type="button" onClick={() => apiRef.current?.resetView()} className="rounded border border-border bg-surface/80 px-2 py-0.5 text-[11px] text-text-secondary transition-colors hover:border-accent/40 hover:text-accent">
-            reset view
-          </button>
-          <button type="button" onClick={toggleFullscreen} className="rounded border border-border bg-surface/80 px-2 py-0.5 text-[11px] text-text-secondary transition-colors hover:border-accent/40 hover:text-accent">
-            exit fullscreen
-          </button>
+      {/* Compact toolbar, top-left ON the canvas: view toggles as chips. */}
+      <div className="absolute left-2 top-2 z-20 flex flex-wrap items-center gap-1.5">
+        <ToolChip active={showEdges} onClick={() => setShowEdges((v) => !v)} label="edges" />
+        <ToolChip active={bridgesOnly} disabled={!showEdges} onClick={() => setBridgesOnly((v) => !v)} label="bridges only" />
+        <ToolChip active={showArrows} disabled={!showEdges} onClick={() => setShowArrows((v) => !v)} label="direction" />
+        <ToolChip active={showClouds} onClick={() => setShowClouds((v) => !v)} label="clouds" />
+        {selected && <ToolChip active={false} onClick={() => apiRef.current?.setSelection(selected, true)} label="expand network" />}
+        <span
+          className="cursor-help rounded-full border border-border bg-surface/70 px-1.5 py-0.5 text-[11px] text-text-muted"
+          title={`drag to orbit (grab-the-world), scroll to zoom, right-drag to pan
+hover: paper title · click: light its network (shift-click grows a hop)
+double-click: open the paper · click empty space or Esc: clear
+${drawnEdgeCounts ? `${drawnEdgeCounts.intra} intra + ${drawnEdgeCounts.bridge} bridge edges drawn` : ""}`}
+        >
+          ?
+        </span>
+        {process.env.NODE_ENV === "development" && (
+          <ToolChip active={devOpen} onClick={() => setDevOpen((v) => !v)} label="dev" />
+        )}
+      </div>
+      {process.env.NODE_ENV === "development" && devOpen && (
+        <div className="absolute left-2 top-10 z-20 flex flex-col gap-1 rounded-lg border border-dashed border-border bg-surface/85 px-3 py-2 backdrop-blur-sm">
+          <DevSlider label="cloud opacity" min={0} max={2} step={0.05} initial={1} onChange={(v) => apiRef.current?.setDevTuning({ cloudOpacity: v })} />
+          <DevSlider label="cloud scale" min={0.4} max={1.8} step={0.05} initial={1} onChange={(v) => apiRef.current?.setDevTuning({ cloudScale: v })} />
+          <DevSlider label="bridge opacity" min={0} max={2} step={0.05} initial={1} onChange={(v) => apiRef.current?.setDevTuning({ bridgeAlpha: v })} />
         </div>
       )}
 
-      {hover && (
-        <div className="pointer-events-none absolute z-20 max-w-sm rounded-lg border border-border bg-surface-raised px-3 py-2 text-[12px] text-text-primary shadow-sm" style={{ left: Math.min(hover.x + 12, (mountRef.current?.clientWidth ?? 600) - 220), top: hover.y + 12 }}>
-        {hover.label}
-          <span className="mt-0.5 block text-[11px] text-text-muted">
-            {hover.community !== null ? commLabel.get(hover.community) ?? `community ${hover.community}` : "unassigned"} · influence {hover.influence}
-          </span>
-        </div>
-      )}
-
-      {!isFullscreen && (
-      <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2">
-        <label className="flex items-center gap-1.5 text-[12px] text-text-secondary">
-          <input type="checkbox" checked={showEdges} onChange={(e) => setShowEdges(e.target.checked)} /> edges
-        </label>
-        <label className={`flex items-center gap-1.5 text-[12px] ${showEdges ? "text-text-secondary" : "text-text-muted"}`}>
-          <input type="checkbox" checked={bridgesOnly} disabled={!showEdges} onChange={(e) => setBridgesOnly(e.target.checked)} /> bridges only
-        </label>
-        <label className={`flex items-center gap-1.5 text-[12px] ${showEdges ? "text-text-secondary" : "text-text-muted"}`}>
-          <input type="checkbox" checked={showArrows} disabled={!showEdges} onChange={(e) => setShowArrows(e.target.checked)} /> bridge direction
-        </label>
-        <label className="flex items-center gap-1.5 text-[12px] text-text-secondary">
-          <input type="checkbox" checked={showClouds} onChange={(e) => setShowClouds(e.target.checked)} /> clouds
-        </label>
-        <button type="button" onClick={() => apiRef.current?.resetView()} className="rounded border border-border px-2 py-0.5 text-[12px] text-text-secondary transition-colors hover:border-accent/40 hover:text-accent">
-          reset view
-        </button>
-        {selected && (
-          <button type="button" onClick={() => apiRef.current?.setSelection(selected, true)} className="rounded border border-border px-2 py-0.5 text-[12px] text-text-secondary transition-colors hover:border-accent/40 hover:text-accent">
-            expand network
-          </button>
-        )}
-        {drawnEdgeCounts && (
-          <span className="font-mono text-[11px] text-text-muted">
-            {drawnEdgeCounts.intra} intra + {drawnEdgeCounts.bridge} bridge edges drawn
-          </span>
-        )}
+      {/* Top-right: reset + fullscreen (Esc hint while fullscreen). */}
+      <div className="absolute right-2 top-2 z-20 flex items-center gap-1.5">
+        {isFullscreen && <span className="rounded bg-surface/70 px-2 py-0.5 text-[11px] text-text-muted">Esc to exit</span>}
+        <ToolChip active={false} onClick={() => apiRef.current?.resetView()} label="reset view" />
+        <ToolChip active={isFullscreen} onClick={toggleFullscreen} label={isFullscreen ? "exit fullscreen" : "fullscreen"} />
       </div>
-      )}
 
-      {/* Interactive legend: hover highlights a community, click isolates it. */}
-      {!isFullscreen && (
-      <div className="mt-2 flex flex-wrap items-center gap-2" onMouseLeave={() => legendHover(null)}>
+      {/* Interactive legend, bottom-left ON the canvas: hover highlights a
+          community, click isolates it. */}
+      <div className="absolute bottom-2 left-2 z-20 flex max-w-[70%] flex-wrap items-center gap-1.5" onMouseLeave={() => legendHover(null)}>
         {communities.map((c) => (
           <button
             key={c.index}
             type="button"
             onMouseEnter={() => legendHover(c.index)}
             onClick={() => legendClick(c.index)}
-            className={`flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] transition-colors ${isolated === c.index ? "border-accent/60 text-text-primary" : "border-border text-text-secondary hover:border-accent/30"}`}
+            className={`flex items-center gap-1.5 rounded-full border bg-surface/70 px-2 py-0.5 text-[11px] backdrop-blur-sm transition-colors ${isolated === c.index ? "border-accent/60 text-text-primary" : "border-border text-text-secondary hover:border-accent/30"}`}
           >
             <span className="inline-block h-2 w-2 rounded-full" style={{ backgroundColor: `#${communityColor(c.index).toString(16).padStart(6, "0")}` }} />
             {c.label ?? `community ${c.index}`}
@@ -1160,26 +1569,32 @@ export function WebGraph3D({
           </button>
         ))}
       </div>
-      )}
 
-      {!isFullscreen && (
-      <p className="mt-1.5 text-[11px] text-text-muted">
-        drag to orbit, scroll to zoom, right-drag to pan · hover for a paper's title · click a paper to light its network (shift-click or "expand network" grows it one hop) · double-click to open the paper · click empty space to clear
-      </p>
-      )}
-
-      {/* Dev-only tuning row: multipliers over the shipped constants so the
-          human can find good values by eye, then bake them into the constants
-          above. Never rendered in production builds. */}
-      {process.env.NODE_ENV === "development" && !isFullscreen && (
-        <div className="mt-2 flex flex-wrap items-center gap-x-5 gap-y-1 rounded-lg border border-dashed border-border px-3 py-2">
-          <span className="text-[10px] font-medium uppercase tracking-wide text-text-muted">dev tuning</span>
-          <DevSlider label="cloud opacity" min={0} max={2} step={0.05} initial={1} onChange={(v) => apiRef.current?.setDevTuning({ cloudOpacity: v })} />
-          <DevSlider label="cloud scale" min={0.4} max={1.8} step={0.05} initial={1} onChange={(v) => apiRef.current?.setDevTuning({ cloudScale: v })} />
-          <DevSlider label="bridge opacity" min={0} max={2} step={0.05} initial={1} onChange={(v) => apiRef.current?.setDevTuning({ bridgeAlpha: v })} />
+      {hover && (
+        <div className="pointer-events-none absolute z-30 max-w-sm rounded-lg border border-border bg-surface-raised px-3 py-2 text-[12px] text-text-primary shadow-sm" style={{ left: Math.min(hover.x + 12, (mountRef.current?.clientWidth ?? 600) - 220), top: hover.y + 12 }}>
+          {hover.label}
+          <span className="mt-0.5 block text-[11px] text-text-muted">
+            {hover.community !== null ? commLabel.get(hover.community) ?? `community ${hover.community}` : "unassigned"} · influence {hover.influence}
+          </span>
         </div>
       )}
     </div>
+  );
+}
+
+// A small translucent toggle chip for the on-canvas toolbar.
+function ToolChip({ label, active, disabled, onClick }: { label: string; active: boolean; disabled?: boolean; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={onClick}
+      className={`rounded-full border bg-surface/70 px-2 py-0.5 text-[11px] backdrop-blur-sm transition-colors disabled:opacity-40 ${
+        active ? "border-accent/50 text-accent" : "border-border text-text-secondary hover:border-accent/30 hover:text-accent"
+      }`}
+    >
+      {label}
+    </button>
   );
 }
 

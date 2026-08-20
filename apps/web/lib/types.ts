@@ -413,6 +413,8 @@ export type WebGraphNode = {
   degree: number | null;
   isBridge: boolean;
   influence: number;
+  // Library membership: grounds library-scoped portal activity in real nodes.
+  libraryIds?: string[];
   x: number | null;
   y: number | null;
   z: number | null;
@@ -429,7 +431,7 @@ export type WebAbcCandidate = {
     base_score?: number;
     domain_distance_factor?: number;
     community_similarity?: number | null;
-    path_evidence?: { b_label: string; a_leg_papers: { title: string }[]; c_leg_papers: { title: string }[] }[];
+    path_evidence?: { b_label: string; a_leg_papers: { id?: string; title: string }[]; c_leg_papers: { id?: string; title: string }[] }[];
   };
 };
 export type WebDiscovery = {
@@ -501,6 +503,7 @@ export type SchedulerTaskStatus = "queued" | "approved" | "deferred" | "rejected
 export type SchedulerTaskView = {
   id: string;
   kind: string;
+  scopeIds?: string[];
   scopeNames: string[];
   priority: number;
   costEstimateUsd: number;
@@ -517,6 +520,7 @@ export type SchedulerTaskView = {
     elapsedMs?: number;
     summary?: string | null;
     error?: string | null;
+    metricsOutcome?: Record<string, unknown> | null;
   } | null;
   createdAt: string;
   startedAt: string | null;
@@ -557,3 +561,32 @@ export type SchedulerLatest = {
 // thinking during detection, loading during execution, success/error on task
 // completion (held briefly, then back to idle).
 export type SchedulerBotState = "idle" | "thinking" | "loading" | "success" | "error";
+
+// ---------------------------------------------------------------------------
+// Research pipeline (per-library stage state, derived server-side from the
+// scheduler's detection logic).
+// ---------------------------------------------------------------------------
+
+export type PipelineStageState = "done" | "stale" | "missing" | "none_found";
+
+export type PipelineLibrary = {
+  id: string;
+  name: string;
+  isAllPapers: boolean;
+  paperCount: number;
+  stages: {
+    papers: { state: PipelineStageState; count: number };
+    synthesis: { state: PipelineStageState; at: string | null };
+    critic: { state: PipelineStageState; at: string | null };
+    metrics: { state: PipelineStageState; rows: number };
+    crossDomain: { state: PipelineStageState; at: string | null };
+    experiment: { state: PipelineStageState; at: string | null };
+    document: { state: PipelineStageState; at: string | null };
+  };
+};
+
+export type ResearchPipeline = {
+  libraries: PipelineLibrary[];
+  unauditedSyntheses: number;
+  stats: SchedulerStats;
+};

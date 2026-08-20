@@ -17,6 +17,8 @@ import type { SchedulerBotState } from "@/lib/types";
 // ---------------------------------------------------------------------------
 
 // TUNING SURFACE: the values the human adjusts by eye on /bot-test.
+export type BotProfileName = "calm" | "curious" | "playful" | "focused";
+
 export type BotTuning = {
   bodyGreen: string; // base green hex; flippers/antenna/feet derive from it
   bellyCoverage: number; // 0.4..0.8; fraction of the front the white panel covers
@@ -27,6 +29,12 @@ export type BotTuning = {
   faceStyle: "beak" | "mouth"; // penguin beak nub vs curved-line mouth
   materialStyle: "soft" | "toon"; // plush-vinyl physical vs 3-step toon
   cheeks: boolean; // faint blush spots
+  profile: BotProfileName; // personality preset (coefficient set, no new art)
+  waddle: boolean; // idle locomotion on/off
+  waddleRollDeg: number; // side-to-side body roll per step; raise = drunker sailor
+  waddleSpeed: number; // step rate multiplier; raise = busier walk
+  anticFrequency: number; // antic rate multiplier; raise = more of a ham
+  wanderRadius: number; // how far from center it wanders (world units)
 };
 
 export const BOT_DEFAULTS: BotTuning = {
@@ -39,7 +47,84 @@ export const BOT_DEFAULTS: BotTuning = {
   faceStyle: "beak",
   materialStyle: "soft",
   cheeks: true,
+  profile: "curious",
+  waddle: true,
+  waddleRollDeg: 8,
+  waddleSpeed: 1.0,
+  anticFrequency: 1.0,
+  wanderRadius: 0.7,
 };
+
+// ---------------------------------------------------------------------------
+// PERSONALITY PROFILES: coefficient sets over the existing animation
+// parameters, no new art. anticWeights multiply the base weight of specific
+// antics (unlisted antics keep weight 1).
+// ---------------------------------------------------------------------------
+type BotProfile = {
+  breathMult: number; // idle breath rate multiplier
+  blinkMult: number; // blink frequency multiplier
+  anticIntervalMult: number; // higher = rarer antics
+  waddleSpeedMult: number;
+  waddleAmplMult: number; // roll/bob amplitude multiplier
+  poseRateMult: number; // easing snappiness; higher = quicker transitions
+  sparkleMult: number; // success/sneeze sparkle intensity
+  wanderMult: number; // wander radius multiplier
+  anticWeights: Record<string, number>;
+};
+
+export const PROFILES: Record<BotProfileName, BotProfile> = {
+  calm: {
+    breathMult: 0.75,
+    blinkMult: 0.8,
+    anticIntervalMult: 2.2,
+    waddleSpeedMult: 0.7,
+    waddleAmplMult: 0.7,
+    poseRateMult: 0.8,
+    sparkleMult: 0.6,
+    wanderMult: 0.7,
+    anticWeights: { stretch_yawn: 1.6, sit_stand: 1.6, spin_dizzy: 0.3, hop: 0.4, flutter_lift: 0.4 },
+  },
+  curious: {
+    breathMult: 1.0,
+    blinkMult: 1.1,
+    anticIntervalMult: 1.0,
+    waddleSpeedMult: 1.0,
+    waddleAmplMult: 1.0,
+    poseRateMult: 1.0,
+    sparkleMult: 1.0,
+    wanderMult: 1.1,
+    anticWeights: { look_around: 3, follow_cursor: 3, sneeze: 0.7 },
+  },
+  playful: {
+    breathMult: 1.2,
+    blinkMult: 1.2,
+    anticIntervalMult: 0.55,
+    waddleSpeedMult: 1.35,
+    waddleAmplMult: 1.3,
+    poseRateMult: 1.1,
+    sparkleMult: 1.8,
+    wanderMult: 1.3,
+    anticWeights: { hop: 2.5, flutter_lift: 2, spin_dizzy: 1.6, slip_recover: 1.4 },
+  },
+  focused: {
+    breathMult: 0.9,
+    blinkMult: 0.9,
+    anticIntervalMult: 3.5,
+    waddleSpeedMult: 0.9,
+    waddleAmplMult: 0.8,
+    poseRateMult: 1.5,
+    sparkleMult: 0.8,
+    wanderMult: 0.4,
+    anticWeights: { look_around: 0.5, follow_cursor: 0.3, spin_dizzy: 0.1, hop: 0.3, slip_recover: 0.2, stretch_yawn: 0.5 },
+  },
+};
+
+// When on, the profile shifts with lab state: executing or thinking states
+// snap the coefficients to "focused" (the picker still owns idle).
+const PROFILE_FOLLOWS_LAB_STATE = true;
+
+// The imperative surface /bot-test uses to fire antics on demand.
+export type BotApi = { fireAntic(name: string): void; antics: string[] };
 
 // ---------------------------------------------------------------------------
 // Fixed constants. Comments say what raising the value does visually.
@@ -106,6 +191,30 @@ const ERROR_BOB_S = 2.2; // slow sad bob period
 const HOVER_SCALE = 1.08;
 const GAZE_RANGE = 0.05; // pupil-less design: whole eyes shift subtly toward cursor
 
+// Waddle locomotion (idle only). Real weight-shift: roll into the planted
+// side, alternating foot lifts, a small bob, squash on each plant.
+const WADDLE_STEP_HZ = 2.1; // steps per second at waddleSpeed 1
+const WADDLE_BOB = 0.035; // vertical bob per step; raise = bouncier walk
+const WADDLE_FOOT_LIFT = 0.05; // foot nub lift height
+const WADDLE_LEAN = 0.05; // forward lean into movement (radians)
+const WADDLE_MOVE_SPEED = 0.28; // world units per second of travel
+const WADDLE_FLIPPER_SWING = 0.22; // counter-swing amplitude
+const WADDLE_TURN_RATE = 3.0; // 1/s easing of the facing direction
+const WADDLE_MAX_YAW = 0.85; // radians; never fully turns its back
+const WANDER_INTERVAL_S_MIN = 2.5; // idle seconds between wanders; lower = inhabits the space
+const WANDER_INTERVAL_S_MAX = 7;
+const WANDER_CHAIN_PROB = 0.5; // chance a wander continues into another leg (direction change)
+const WANDER_CENTER_PULL = 0.45; // fraction of each target pulled toward center
+const WANDER_MARGIN = 0.12; // container-edge margin in world units
+// The bot walks a FLOOR LINE: wander depth is a small fraction of the lateral
+// range, so it paces left and right rather than drifting through space.
+const WANDER_Z_FACTOR = 0.12;
+
+// Antics (idle only; real states always win and cancel gracefully).
+const ANTIC_INTERVAL_S_MIN = 5; // band between antics at anticFrequency 1
+const ANTIC_INTERVAL_S_MAX = 11;
+const ANTIC_FADE_RATE = 8; // 1/s fade-out when a real state interrupts (~250ms)
+
 const easeInOutCubic = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
 const easeOutCubic = (t: number) => 1 - Math.pow(1 - t, 3);
 const easeInCubic = (t: number) => t * t * t;
@@ -114,6 +223,160 @@ const smoothstep = (a: number, b: number, x: number) => {
   const t = clamp01((x - a) / (b - a));
   return t * t * (3 - 2 * t);
 };
+// Eased bump inside the window [a, b]: 0 outside, sine arc inside.
+const win = (p: number, a: number, b: number) => (p < a || p > b ? 0 : Math.sin(Math.PI * ((p - a) / (b - a))));
+// Smooth plateau: rises over [a1, a2], holds, falls over [b1, b2].
+const plateau = (p: number, a1: number, a2: number, b1: number, b2: number) => smoothstep(a1, a2, p) * (1 - smoothstep(b1, b2, p));
+
+// ---------------------------------------------------------------------------
+// ANTICS: named, self-contained timelines with anticipation, action, and
+// settle phases. Every pose function starts AND ends at neutral (p=0 and p=1
+// produce zero offsets), so a completed antic hands back to idle seamlessly.
+// p is 0..1 through the antic; r is a per-run random in [0, 1).
+// ---------------------------------------------------------------------------
+type AnticPose = {
+  x?: number;
+  y?: number;
+  rotX?: number;
+  rotY?: number;
+  rotZ?: number;
+  squashDelta?: number; // added to the squash target (volume-preserved)
+  flipL?: number; // added to the flipper targets
+  flipR?: number;
+  eyesClosed?: number; // 0..1
+  gazeFollow?: number; // 0..1 extra cursor-follow weight
+  sparkle?: boolean; // request a small sparkle burst
+};
+type AnticDef = { name: string; duration: number; weight: number; pose: (p: number, r: number) => AnticPose };
+
+const ANTICS: AnticDef[] = [
+  {
+    name: "stretch_yawn",
+    duration: 2.4,
+    weight: 1,
+    pose: (p) => ({
+      squashDelta: -0.06 * win(p, 0, 0.22) + 0.14 * win(p, 0.22, 0.75),
+      flipL: 1.5 * win(p, 0.25, 0.75),
+      flipR: -1.5 * win(p, 0.25, 0.75),
+      eyesClosed: win(p, 0.3, 0.72),
+      rotX: -0.08 * win(p, 0.25, 0.75), // chin up into the yawn
+    }),
+  },
+  {
+    name: "spin_dizzy",
+    duration: 2.8,
+    weight: 1,
+    pose: (p) => ({
+      rotY: -0.45 * win(p, 0, 0.2) + (p >= 0.2 && p < 0.68 ? Math.PI * 2 * easeInOutCubic((p - 0.2) / 0.48) : p >= 0.68 ? Math.PI * 2 : 0),
+      rotZ: p > 0.68 ? 0.16 * Math.sin((p - 0.68) * 34) * (1 - (p - 0.68) / 0.32) : 0,
+      eyesClosed: 0.5 * win(p, 0.7, 0.95), // woozy after the spin
+    }),
+  },
+  {
+    name: "hop",
+    duration: 1.1,
+    weight: 1,
+    pose: (p) => ({
+      squashDelta: -0.13 * win(p, 0, 0.26) + 0.1 * win(p, 0.4, 0.6) - 0.11 * win(p, 0.72, 0.88),
+      y: 0.16 * win(p, 0.26, 0.74),
+    }),
+  },
+  {
+    name: "look_around",
+    duration: 3.0,
+    weight: 1,
+    pose: (p, r) => ({
+      rotY: (r > 0.5 ? 1 : -1) * (0.5 * win(p, 0.05, 0.45) - 0.5 * win(p, 0.52, 0.92)),
+      rotZ: 0.04 * win(p, 0.05, 0.45) - 0.04 * win(p, 0.52, 0.92),
+    }),
+  },
+  {
+    name: "slip_recover",
+    duration: 1.9,
+    weight: 0.8,
+    pose: (p, r) => ({
+      rotZ: (r > 0.5 ? 1 : -1) * (-0.34 * win(p, 0.05, 0.32) + 0.12 * win(p, 0.45, 0.7)),
+      y: -0.05 * win(p, 0.1, 0.32),
+      flipL: 0.9 * Math.sin(p * 40) * win(p, 0.08, 0.45),
+      flipR: -0.9 * Math.sin(p * 40 + 1.3) * win(p, 0.08, 0.45),
+    }),
+  },
+  {
+    name: "follow_cursor",
+    duration: 2.6,
+    weight: 1,
+    pose: (p) => ({ gazeFollow: win(p, 0.08, 0.92) }),
+  },
+  {
+    name: "sneeze",
+    duration: 1.7,
+    weight: 0.7,
+    pose: (p) => ({
+      squashDelta: 0.08 * win(p, 0, 0.42) - 0.14 * win(p, 0.42, 0.62),
+      rotX: -0.1 * win(p, 0, 0.42) + 0.32 * win(p, 0.42, 0.6),
+      eyesClosed: smoothstep(0.15, 0.42, p) * (1 - smoothstep(0.6, 0.8, p)),
+      sparkle: p >= 0.45 && p <= 0.5,
+    }),
+  },
+  {
+    name: "sit_stand",
+    duration: 3.2,
+    weight: 0.9,
+    pose: (p) => ({
+      squashDelta: -0.16 * plateau(p, 0.06, 0.22, 0.72, 0.92),
+      flipL: -0.25 * plateau(p, 0.06, 0.22, 0.72, 0.92),
+      flipR: 0.25 * plateau(p, 0.06, 0.22, 0.72, 0.92),
+    }),
+  },
+  {
+    name: "flutter_lift",
+    duration: 1.9,
+    weight: 0.9,
+    pose: (p) => ({
+      flipL: 1.1 * Math.sin(p * 52) * win(p, 0.08, 0.62),
+      flipR: -1.1 * Math.sin(p * 52) * win(p, 0.08, 0.62),
+      y: 0.1 * win(p, 0.22, 0.68),
+      squashDelta: -0.08 * win(p, 0.68, 0.82),
+    }),
+  },
+  {
+    name: "peck_nod",
+    duration: 2.2,
+    weight: 1,
+    pose: (p) => ({
+      // Turns toward the panel edge (the dock sits to its right) and pecks
+      // three times: anticipation lean, nods, settle back.
+      rotY: 0.5 * plateau(p, 0.05, 0.2, 0.78, 0.95),
+      rotX: (0.22 * Math.max(0, Math.sin((p - 0.22) * Math.PI * 6)) + 0.04) * plateau(p, 0.18, 0.26, 0.72, 0.85),
+      squashDelta: -0.03 * plateau(p, 0.18, 0.26, 0.72, 0.85),
+    }),
+  },
+  {
+    name: "blink_stretch",
+    duration: 2.8,
+    weight: 1,
+    pose: (p) => ({
+      // A slow contented blink that melts into a gentle upward stretch.
+      eyesClosed: plateau(p, 0.05, 0.3, 0.55, 0.8),
+      squashDelta: 0.1 * win(p, 0.3, 0.85),
+      rotX: -0.06 * win(p, 0.3, 0.85),
+      flipL: 0.5 * win(p, 0.35, 0.85),
+      flipR: -0.5 * win(p, 0.35, 0.85),
+    }),
+  },
+  {
+    name: "notice_wave",
+    duration: 2.4,
+    weight: 1.1,
+    pose: (p) => ({
+      // Notices the user: turns toward the cursor (gazeFollow drives the
+      // turn), then one small friendly wave with the right flipper.
+      gazeFollow: plateau(p, 0.05, 0.2, 0.85, 0.98),
+      flipR: -(1.9 + 0.5 * Math.sin(p * 26)) * plateau(p, 0.28, 0.4, 0.7, 0.88),
+      rotZ: -0.04 * plateau(p, 0.28, 0.4, 0.7, 0.88),
+    }),
+  },
+];
 
 // Deterministic PRNG so blink/weight-shift schedules are stable per mount.
 function mulberry32(seed: number): () => number {
@@ -275,12 +538,15 @@ export function SchedulerBot({
   size = BOT_SIZE_PX,
   title,
   tuning,
+  registerApi,
 }: {
   state: SchedulerBotState;
   onClick?: () => void;
   size?: number;
   title?: string;
   tuning?: Partial<BotTuning>;
+  // /bot-test uses this to fire antics on demand by name.
+  registerApi?: (api: BotApi | null) => void;
 }) {
   const mountRef = useRef<HTMLDivElement | null>(null);
   const stateRef = useRef<SchedulerBotState>(state);
@@ -572,6 +838,7 @@ export function SchedulerBot({
       y: 0,
       rotZ: 0,
       rotX: 0,
+      rotY: 0, // antic body turn (spin, look-around, cursor follow)
       flipL: FLIP_REST,
       flipR: -FLIP_REST,
       eyeArc: 0, // 0 open eyes, 1 happy arcs (crossfaded by visibility swap at 0.5)
@@ -591,6 +858,61 @@ export function SchedulerBot({
 
     let sparkleStart = -1;
 
+    // -----------------------------------------------------------------------
+    // ANTICS ENGINE. Idle-only by default; real states always win: an antic
+    // in progress fades out over ~250ms instead of cutting. Never the same
+    // antic twice in a row.
+    // -----------------------------------------------------------------------
+    let activeAntic: AnticDef | null = null;
+    let anticStart = 0;
+    let anticSeed = 0;
+    let anticFade = 0;
+    let anticForced = false; // /bot-test buttons play even outside idle
+    let lastAnticName = "";
+    let nextAnticAt = performance.now() + 5000;
+    const pickAntic = (prof: BotProfile): AnticDef => {
+      const pool = ANTICS.filter((a) => a.name !== lastAnticName);
+      const weights = pool.map((a) => a.weight * (prof.anticWeights[a.name] ?? 1));
+      const total = weights.reduce((s, w) => s + w, 0);
+      let r = rand() * total;
+      for (let i = 0; i < pool.length; i++) {
+        r -= weights[i];
+        if (r <= 0) return pool[i];
+      }
+      return pool[pool.length - 1];
+    };
+    const startAntic = (def: AnticDef, forced: boolean) => {
+      activeAntic = def;
+      anticStart = performance.now();
+      anticSeed = rand();
+      anticForced = forced;
+      lastAnticName = def.name;
+    };
+
+    // -----------------------------------------------------------------------
+    // WADDLE ENGINE. Wanders a short distance during idle, stays inside the
+    // container with a margin, and every target is pulled toward center so it
+    // never parks in a corner.
+    // -----------------------------------------------------------------------
+    let posX = 0;
+    let posZ = 0;
+    let yaw = 0;
+    let walkPhase = 0;
+    let walkAmp = 0; // eases 0..1 so the waddle starts and stops softly
+    let wandering = false;
+    let wanderX = 0;
+    let wanderZ = 0;
+    let nextWanderAt = performance.now() + 4000;
+    const feetBaseY = feet.map((f) => f.position.y);
+
+    registerApi?.({
+      fireAntic: (name: string) => {
+        const def = ANTICS.find((a) => a.name === name);
+        if (def && !reducedMotion) startAntic(def, true);
+      },
+      antics: ANTICS.map((a) => a.name),
+    });
+
     let raf = 0;
     let disposed = false;
     let lastT = performance.now();
@@ -609,7 +931,11 @@ export function SchedulerBot({
         if (s === "success") sparkleStart = -1;
       }
       const sinceEntry = (now - stateEnteredAtRef.current) / 1000;
-      const k = 1 - Math.exp(-POSE_RATE * dt); // ~250ms crossfade
+      // Personality: a coefficient set over the same parameters. When the lab
+      // is actually working (loading/thinking), focus wins the coefficients.
+      const profName: BotProfileName = PROFILE_FOLLOWS_LAB_STATE && (s === "loading" || s === "thinking") ? "focused" : t.profile;
+      const prof = PROFILES[profName];
+      const k = 1 - Math.exp(-POSE_RATE * prof.poseRateMult * dt); // ~250ms crossfade
 
       // Per-state targets.
       let tgSquash = 1;
@@ -623,7 +949,7 @@ export function SchedulerBot({
       let tgDots = 0;
       let tgCloud = 0;
 
-      const breath = 1 + BREATH_AMPLITUDE * 0.5 * (1 + Math.sin((now / 1000 / (BREATH_PERIOD_S / Math.max(0.2, t.breathingSpeed))) * Math.PI * 2));
+      const breath = 1 + BREATH_AMPLITUDE * 0.5 * (1 + Math.sin((now / 1000 / (BREATH_PERIOD_S / Math.max(0.2, t.breathingSpeed * prof.breathMult))) * Math.PI * 2));
 
       if (s === "idle") {
         tgSquash = breath;
@@ -683,11 +1009,116 @@ export function SchedulerBot({
         tgCloud = 1;
       }
 
+      // ---------------------------------------------------------------------
+      // WADDLE (idle only; real states pull the bot back toward center).
+      // ---------------------------------------------------------------------
+      let wRoll = 0;
+      let wBob = 0;
+      let wLean = 0;
+      let wFlip = 0;
+      let wSquash = 0;
+      let footL = 0;
+      let footR = 0;
+      let targetYaw = 0;
+      const waddling = s === "idle" && t.waddle && !reducedMotion && !activeAntic;
+      if (waddling && !wandering && now >= nextWanderAt) {
+        const R = Math.max(0.1, t.wanderRadius * prof.wanderMult);
+        // Center pull: targets shrink toward 0 so it never parks in a corner.
+        wanderX = Math.max(-(R - WANDER_MARGIN), Math.min(R - WANDER_MARGIN, (rand() * 2 - 1) * R * (1 - WANDER_CENTER_PULL)));
+        wanderZ = (rand() * 2 - 1) * R * WANDER_Z_FACTOR * (1 - WANDER_CENTER_PULL);
+        wandering = true;
+      }
+      if (wandering && waddling) {
+        const dx = wanderX - posX;
+        const dz = wanderZ - posZ;
+        const dist = Math.hypot(dx, dz);
+        if (dist < 0.03) {
+          if (rand() < WANDER_CHAIN_PROB) {
+            // Chain into another leg: a direction change mid-wander.
+            const R = Math.max(0.1, t.wanderRadius * prof.wanderMult);
+            wanderX = Math.max(-(R - WANDER_MARGIN), Math.min(R - WANDER_MARGIN, (rand() * 2 - 1) * R * (1 - WANDER_CENTER_PULL)));
+            wanderZ = (rand() * 2 - 1) * R * WANDER_Z_FACTOR * (1 - WANDER_CENTER_PULL);
+          } else {
+            wandering = false;
+            nextWanderAt = now + (WANDER_INTERVAL_S_MIN + rand() * (WANDER_INTERVAL_S_MAX - WANDER_INTERVAL_S_MIN)) * 1000;
+          }
+        } else {
+          const sp = WADDLE_MOVE_SPEED * t.waddleSpeed * prof.waddleSpeedMult;
+          const step = Math.min(dist, sp * dt);
+          posX += (dx / dist) * step;
+          posZ += (dz / dist) * step;
+          walkAmp += (1 - walkAmp) * Math.min(1, dt * 5); // ease into the walk
+          targetYaw = Math.max(-WADDLE_MAX_YAW, Math.min(WADDLE_MAX_YAW, Math.atan2(dx, 0.9)));
+        }
+      } else {
+        walkAmp += (0 - walkAmp) * Math.min(1, dt * 4); // settle softly
+        if (s !== "idle") {
+          wandering = false;
+          posX += (0 - posX) * Math.min(1, dt * 2);
+          posZ += (0 - posZ) * Math.min(1, dt * 2);
+        }
+      }
+      if (walkAmp > 0.01) {
+        walkPhase += dt * Math.PI * 2 * WADDLE_STEP_HZ * t.waddleSpeed * prof.waddleSpeedMult;
+        const rollRad = ((t.waddleRollDeg * Math.PI) / 180) * prof.waddleAmplMult;
+        const sPh = Math.sin(walkPhase);
+        wRoll = sPh * rollRad * walkAmp;
+        wBob = Math.abs(sPh) * WADDLE_BOB * prof.waddleAmplMult * walkAmp;
+        wSquash = -0.05 * Math.pow(1 - Math.abs(sPh), 6) * walkAmp; // squash on each plant
+        wLean = -WADDLE_LEAN * walkAmp; // lean into the walk
+        wFlip = Math.sin(walkPhase + Math.PI) * WADDLE_FLIPPER_SWING * walkAmp; // counter-swing
+        footL = Math.max(0, sPh) * WADDLE_FOOT_LIFT * walkAmp;
+        footR = Math.max(0, -sPh) * WADDLE_FOOT_LIFT * walkAmp;
+      }
+      yaw += (targetYaw - yaw) * Math.min(1, dt * WADDLE_TURN_RATE);
+
+      // ---------------------------------------------------------------------
+      // ANTICS (idle only unless fired from /bot-test). Real states always
+      // win: the fade takes an in-progress antic out over ~250ms.
+      // ---------------------------------------------------------------------
+      if (s === "idle" && !reducedMotion && !activeAntic && now >= nextAnticAt && t.anticFrequency > 0) {
+        startAntic(pickAntic(prof), false);
+        nextAnticAt =
+          now +
+          (((ANTIC_INTERVAL_S_MIN + rand() * (ANTIC_INTERVAL_S_MAX - ANTIC_INTERVAL_S_MIN)) * prof.anticIntervalMult) /
+            Math.max(0.1, t.anticFrequency)) *
+            1000;
+      }
+      let aPose: AnticPose = {};
+      const anticAllowed = activeAntic !== null && (s === "idle" || anticForced);
+      anticFade += ((anticAllowed ? 1 : 0) - anticFade) * Math.min(1, dt * ANTIC_FADE_RATE);
+      if (activeAntic) {
+        const ap = (now - anticStart) / (activeAntic.duration * 1000);
+        if (ap >= 1) {
+          activeAntic = null;
+          anticForced = false;
+        } else {
+          aPose = activeAntic.pose(ap, anticSeed);
+          if (!anticAllowed && anticFade < 0.02) {
+            activeAntic = null;
+            anticForced = false;
+            aPose = {};
+          }
+        }
+      }
+      const af = anticFade;
+      if (aPose.sparkle && now - sparkleStart > 700) sparkleStart = now;
+
+      // Compose waddle + antic over the state targets.
+      tgSquash += wSquash + (aPose.squashDelta ?? 0) * af;
+      tgY += wBob + (aPose.y ?? 0) * af;
+      tgRotZ += wRoll + (aPose.rotZ ?? 0) * af;
+      tgRotX += wLean + (aPose.rotX ?? 0) * af;
+      tgFlipL += wFlip + (aPose.flipL ?? 0) * af;
+      tgFlipR += wFlip + (aPose.flipR ?? 0) * af;
+      const tgRotY = (aPose.rotY ?? 0) * af + gaze.x * 0.45 * (aPose.gazeFollow ?? 0) * af;
+
       // Ease everything (crossfade, never cut).
       cur.squash += (tgSquash - cur.squash) * k;
       cur.y += (tgY - cur.y) * (s === "loading" || s === "success" ? 1 : k); // timeline states own their y exactly
       cur.rotZ += (tgRotZ - cur.rotZ) * k;
       cur.rotX += (tgRotX - cur.rotX) * k;
+      cur.rotY += (tgRotY - cur.rotY) * k;
       cur.flipL += (tgFlipL - cur.flipL) * k;
       cur.flipR += (tgFlipR - cur.flipR) * k;
       cur.eyeArc += (tgArc - cur.eyeArc) * k;
@@ -701,7 +1132,7 @@ export function SchedulerBot({
         if (now >= nextBlinkAt && blinkQueue === 0) {
           blinkQueue = rand() < DOUBLE_BLINK_CHANCE ? 2 : 1;
           blinkStart = now;
-          nextBlinkAt = now + (BLINK_MIN_S + rand() * (BLINK_MAX_S - BLINK_MIN_S)) * 1000;
+          nextBlinkAt = now + ((BLINK_MIN_S + rand() * (BLINK_MAX_S - BLINK_MIN_S)) * 1000) / prof.blinkMult;
         }
       }
       let eyeOpenTarget = 1;
@@ -716,27 +1147,35 @@ export function SchedulerBot({
         }
       }
       if (s === "error") eyeOpenTarget = 0.55; // heavy-lidded sad
+      if (aPose.eyesClosed) eyeOpenTarget = Math.min(eyeOpenTarget, 1 - aPose.eyesClosed * af);
       cur.eyeOpen += (eyeOpenTarget - cur.eyeOpen) * Math.min(1, dt * 40);
 
-      // Apply pose. Squash preserves volume: X/Z widen as Y compresses.
+      // Apply pose. Squash preserves volume: X/Z widen as Y compresses. The
+      // waddle owns root x/z; the yaw turns the whole content group.
       const sq = Math.max(0.5, cur.squash);
       const xz = cur.hoverScale / Math.sqrt(sq);
       root.scale.set(xz, sq * cur.hoverScale, xz);
-      root.position.y = GROUND_Y + cur.y;
+      root.position.set(posX + (aPose.x ?? 0) * af, GROUND_Y + cur.y, posZ);
+      content.rotation.y = yaw;
       lean.rotation.z = cur.rotZ;
       lean.rotation.x = cur.rotX;
+      lean.rotation.y = cur.rotY;
       flipperL.rotation.z = cur.flipL;
       flipperR.rotation.z = cur.flipR;
+      feet[0].position.y = feetBaseY[0] + footL;
+      feet[1].position.y = feetBaseY[1] + footR;
 
       // Eyes: arcs crossfade with open eyes at the halfway point; sad tilts
-      // outer corners down; gaze shifts the whole face subtly.
+      // outer corners down; gaze shifts the whole face subtly (antic
+      // cursor-follow boosts the gaze weight).
       setEyes(cur.eyeArc > 0.5);
+      const gazeBoost = 1 + 3 * (aPose.gazeFollow ?? 0) * af;
       const thinkLook = s === "thinking" ? 0.06 : 0;
       for (const e of [eyeL, eyeR]) {
         e.open.scale.y = Math.max(0.06, cur.eyeOpen);
         e.group.rotation.z = e.side * -0.24 * cur.eyeSad;
-        e.group.position.x = e.side * EYE_SPACING + gaze.x * GAZE_RANGE - (s === "thinking" ? 0.03 : 0);
-        e.group.position.y = EYE_BASE_Y + t.eyeHeight + gaze.y * GAZE_RANGE + thinkLook;
+        e.group.position.x = e.side * EYE_SPACING + gaze.x * GAZE_RANGE * gazeBoost - (s === "thinking" ? 0.03 : 0);
+        e.group.position.y = EYE_BASE_Y + t.eyeHeight + gaze.y * GAZE_RANGE * gazeBoost + thinkLook;
       }
 
       // Effects.
@@ -751,7 +1190,7 @@ export function SchedulerBot({
         if (sp > 1) sparkleStart = 0;
         else {
           for (const sk of sparkles) {
-            sk.mat.opacity = 0.9 * (1 - easeInCubic(sp));
+            sk.mat.opacity = 0.9 * Math.min(1.5, prof.sparkleMult) * (1 - easeInCubic(sp));
             sk.sprite.position.copy(sk.dir).multiplyScalar(0.6 + sp * 0.9);
             sk.sprite.position.y += BODY_LIFT + 0.4;
             sk.sprite.scale.setScalar(0.08 + 0.1 * easeOutCubic(sp));
@@ -763,6 +1202,7 @@ export function SchedulerBot({
 
       // Shadow follows squash and altitude.
       const jumpNorm = clamp01(cur.y / (SUCCESS_JUMP || 1));
+      shadow.position.set(posX, GROUND_Y + 0.005, 0.1 + posZ); // the shadow travels with the waddle
       shadow.scale.set(1.5 * (1 + (1 - sq) * 0.6) * (1 - 0.22 * jumpNorm), 1.0 * (1 + (1 - sq) * 0.6) * (1 - 0.22 * jumpNorm), 1);
       shadowMat.opacity = SHADOW_OPACITY * (1 - 0.55 * jumpNorm);
 
@@ -835,6 +1275,7 @@ export function SchedulerBot({
         mount.removeEventListener("pointerleave", onLeave);
       }
       applyTuningRef.current = null;
+      registerApi?.(null);
       for (const d of disposables) d.dispose();
       renderer.dispose();
       if (renderer.domElement.parentNode === mount) mount.removeChild(renderer.domElement);

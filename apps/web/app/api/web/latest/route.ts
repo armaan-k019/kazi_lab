@@ -63,11 +63,20 @@ export async function GET(request: Request) {
     const paperRefIds = paperNodeRows.map((n) => n.refId).filter((x): x is string => !!x);
     const citeCounts = new Map<string, number>();
     const claimCounts = new Map<string, number>();
+    // Library membership per paper, so the portal can ground library-scoped
+    // activity (e.g. a completion cascade) in that library's actual nodes.
+    const libsByPaper = new Map<string, string[]>();
     if (paperRefIds.length) {
       const ex = await db.select({ paperId: paperExternal.paperId, cited: paperExternal.citedByCount }).from(paperExternal).where(inArray(paperExternal.paperId, paperRefIds));
       for (const e of ex) if (e.cited != null) citeCounts.set(e.paperId, e.cited);
       const cc = await db.execute<{ paper_id: string; c: number }>(sql`select paper_id, count(*)::int c from claims where paper_id in (${sql.join(paperRefIds.map((id) => sql`${id}`), sql`, `)}) group by paper_id`);
       for (const r of cc.rows) claimCounts.set(r.paper_id, r.c);
+      const pl = await db.execute<{ paper_id: string; library_id: string }>(sql`select paper_id, library_id from paper_libraries where paper_id in (${sql.join(paperRefIds.map((id) => sql`${id}`), sql`, `)})`);
+      for (const r of pl.rows) {
+        const arr = libsByPaper.get(r.paper_id) ?? [];
+        arr.push(r.library_id);
+        libsByPaper.set(r.paper_id, arr);
+      }
     }
 
     const nodes = paperNodeRows.map((n) => ({
@@ -78,6 +87,7 @@ export async function GET(request: Request) {
       degree: n.degree,
       isBridge: n.refId ? nodeBridgePaperIds.has(n.refId) : false,
       influence: n.refId ? (citeCounts.get(n.refId) ?? claimCounts.get(n.refId) ?? 0) : 0,
+      libraryIds: n.refId ? (libsByPaper.get(n.refId) ?? []) : [],
       x: n.coordX,
       y: n.coordY,
       z: n.coordZ,

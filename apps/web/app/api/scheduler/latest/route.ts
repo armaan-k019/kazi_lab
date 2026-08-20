@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { desc, eq, inArray } from "drizzle-orm";
 import { db, libraries, schedulerDiagnostics, schedulerRuns, schedulerTasks } from "@kazi-lab/db";
+import { reapStaleExecutions, syncRunStatus } from "@kazi-lab/scheduler";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -9,15 +10,21 @@ export const dynamic = "force-dynamic";
 // scheduler config (documented defaults when unset).
 export async function GET() {
   try {
+    // Heal before reporting: reap orphaned "executing" tasks, then derive the
+    // latest run's status from its tasks so the UI never sees an optimistic
+    // "completed" while work is still in flight.
+    await reapStaleExecutions();
     const config = {
       enabled: process.env.SCHEDULER_ENABLED !== "false",
       intervalMinutes: Number(process.env.SCHEDULER_INTERVAL_MINUTES) > 0 ? Number(process.env.SCHEDULER_INTERVAL_MINUTES) : 60,
     };
 
-    const [run] = await db.select().from(schedulerRuns).orderBy(desc(schedulerRuns.createdAt)).limit(1);
-    if (!run) {
+    const [latestRow] = await db.select({ id: schedulerRuns.id }).from(schedulerRuns).orderBy(desc(schedulerRuns.createdAt)).limit(1);
+    if (!latestRow) {
       return NextResponse.json({ config, run: null, tasks: [], diagnostics: [] });
     }
+    await syncRunStatus(latestRow.id);
+    const [run] = await db.select().from(schedulerRuns).where(eq(schedulerRuns.id, latestRow.id));
 
     const tasks = await db
       .select()
@@ -55,6 +62,7 @@ export async function GET() {
       tasks: tasks.map((t) => ({
         id: t.id,
         kind: t.kind,
+        scopeIds: t.scope,
         scopeNames: t.scope.map((id) => nameBy.get(id) ?? id),
         priority: t.priority,
         costEstimateUsd: t.costEstimateUsd,

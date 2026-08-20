@@ -20,6 +20,11 @@ export type LibrarySnapshot = {
   // (the precondition for metric extraction to have something to read).
   papersWithKeyTerms: number;
   metricRowCount: number;
+  // The latest completed metric-extraction scan outcome for this library
+  // (recorded by the scheduler from the CLI's METRICS_OUTCOME_JSON line).
+  // A CLEAN zero scan (papers processed, nothing skipped, zero rows) is a
+  // real result and must stop the scheduler from re-queuing forever.
+  latestMetricScan: { at: Date; papersProcessed: number; withMetrics: number; skipped: number } | null;
 };
 
 export type CrossDomainSnapshot = {
@@ -197,11 +202,33 @@ export function detectStaleStates(snapshot: CorpusSnapshot, thresholdDays = 30):
     }
   }
 
-  // Rule 2: missing metrics, per library.
+  // Rule 2: missing metrics, per library. A prior CLEAN zero scan (processed
+  // everything, skipped nothing, found nothing) suppresses the task: that is
+  // a genuine "this library has no extractable metrics" result, recorded as a
+  // diagnostic instead of being re-queued forever. A scan with skips does NOT
+  // suppress: those papers still owe a real attempt.
   for (const lib of real) {
     if (lib.papersWithKeyTerms > 0 && lib.metricRowCount === 0) {
+      const scan = lib.latestMetricScan;
+      const cleanZeroScan = scan !== null && scan.papersProcessed > 0 && scan.skipped === 0 && scan.withMetrics === 0;
+      if (cleanZeroScan) {
+        diagnostics.push({
+          kind: "missing_metrics",
+          affectedLibraryId: lib.id,
+          details: {
+            papersWithKeyTerms: lib.papersWithKeyTerms,
+            paperCount: lib.paperCount,
+            scanned: true,
+            papersScanned: scan.papersProcessed,
+            scannedAt: scan.at.toISOString(),
+            reason: "scanned cleanly; no extractable metrics found; not re-queued",
+          },
+        });
+        continue;
+      }
+      const failedScanNote = scan !== null && scan.skipped > 0 ? `; last scan skipped ${scan.skipped}/${scan.papersProcessed} papers` : "";
       tasks.push(
-        makeTask("extract_metrics", [lib], `zero metric rows; ${lib.papersWithKeyTerms} papers have key terms`),
+        makeTask("extract_metrics", [lib], `zero metric rows; ${lib.papersWithKeyTerms} papers have key terms${failedScanNote}`),
       );
       diagnostics.push({
         kind: "missing_metrics",

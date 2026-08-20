@@ -3,129 +3,61 @@
 import { useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { Header } from "@/components/header";
-import { ScribeView } from "@/components/scribe/scribe-view";
-import { CriticView } from "@/components/critic/critic-view";
-import { CrossDomainView } from "@/components/cross-domain/cross-domain-view";
-import { ExperimentalistView } from "@/components/experimentalist/experimentalist-view";
-import { WriterView } from "@/components/writer/writer-view";
-import { WebView } from "@/components/web/web-view";
-import { SchedulerView } from "@/components/scheduler/scheduler-view";
-import { SchedulerBot } from "@/components/scheduler/scheduler-bot";
-import type { SchedulerBotState } from "@/lib/types";
+import { LabProvider } from "@/components/shell/lab-context";
+import { DiscoveryShell } from "@/components/discovery/discovery-shell";
+import { ResearchShell } from "@/components/research/research-shell";
 
-// Two primary sections. RESEARCH holds the four agents (per-library work, with
-// libraries as optional collections). DISCOVERY holds the corpus-wide research
-// web, cross-domain crossover discovery, and the autonomous scheduler.
-// Default landing is DISCOVERY.
+// Two primary sections, ONE shared shell implementation. DISCOVERY's primary
+// region is the portal; RESEARCH's is the selected library's pipeline strip.
+// Panels come from the shared registry, filtered per tab. The LabProvider
+// sits above both so lab state (and selection) survives tab switches.
 type Section = "research" | "discovery";
-type ResearchView = "scribe" | "critic" | "experimentalist" | "writer";
-type DiscoveryView = "web" | "cross-domain" | "scheduler";
-
-const RESEARCH_TABS: { id: ResearchView; name: string }[] = [
-  { id: "scribe", name: "Scribe" },
-  { id: "critic", name: "Critic" },
-  { id: "experimentalist", name: "Experimentalist" },
-  { id: "writer", name: "Writer" },
-];
-const DISCOVERY_TABS: { id: DiscoveryView; name: string }[] = [
-  { id: "web", name: "Web" },
-  { id: "cross-domain", name: "Cross-Domain" },
-  { id: "scheduler", name: "Scheduler" },
-];
 
 export default function Home() {
   const [section, setSection] = useState<Section>("discovery");
-  const [research, setResearch] = useState<ResearchView>("scribe");
-  const [discovery, setDiscovery] = useState<DiscoveryView>("web");
-  // The bot mirrors scheduler activity; the Scheduler view drives it, and
-  // clicking the bot navigates to the Scheduler panel.
-  const [botState, setBotState] = useState<SchedulerBotState>("idle");
 
   return (
-    <main className="mx-auto w-full max-w-5xl px-6 pb-32">
-      {/* The scheduler's face: fixed top-right, always visible. */}
-      <div className="fixed right-3 top-3 z-40 h-[92px] w-[92px]">
-        <SchedulerBot
-          state={botState}
-          size={92}
-          title={`scheduler: ${botState} (click to open)`}
-          onClick={() => {
-            setSection("discovery");
-            setDiscovery("scheduler");
-          }}
-        />
-      </div>
-      <Header />
+    <LabProvider>
+      <main className="mx-auto w-full max-w-[1720px] px-4 pb-6">
+        <Header compact />
 
-      {/* Primary section nav. */}
-      <nav className="flex gap-x-8 border-b border-border">
-        {(["discovery", "research"] as Section[]).map((s) => {
-          const activeS = section === s;
-          return (
-            <button
-              key={s}
-              type="button"
-              onClick={() => setSection(s)}
-              className="group relative -mb-px pb-3 pt-1 text-left"
-              aria-current={activeS ? "page" : undefined}
+        {/* Primary section nav. */}
+        <nav className="flex gap-x-8 border-b border-border">
+          {(["discovery", "research"] as Section[]).map((s) => {
+            const activeS = section === s;
+            return (
+              <button
+                key={s}
+                type="button"
+                onClick={() => setSection(s)}
+                className="group relative -mb-px pb-3 pt-1 text-left"
+                aria-current={activeS ? "page" : undefined}
+              >
+                <span className={["text-sm font-semibold uppercase tracking-wide transition-colors", activeS ? "text-text-primary" : "text-text-secondary group-hover:text-text-primary"].join(" ")}>
+                  {s === "discovery" ? "Discovery" : "Research"}
+                </span>
+                {activeS && (
+                  <motion.span layoutId="primary-underline" className="absolute inset-x-0 bottom-0 h-0.5 rounded-full bg-accent" transition={{ type: "spring", stiffness: 420, damping: 34 }} />
+                )}
+              </button>
+            );
+          })}
+        </nav>
+
+        <div className="mt-3">
+          <AnimatePresence mode="wait">
+            <motion.section
+              key={section}
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -8 }}
+              transition={{ duration: 0.2, ease: "easeOut" }}
             >
-              <span className={["text-sm font-semibold uppercase tracking-wide transition-colors", activeS ? "text-text-primary" : "text-text-secondary group-hover:text-text-primary"].join(" ")}>
-                {s === "discovery" ? "Discovery" : "Research"}
-              </span>
-              {activeS && (
-                <motion.span layoutId="primary-underline" className="absolute inset-x-0 bottom-0 h-0.5 rounded-full bg-accent" transition={{ type: "spring", stiffness: 420, damping: 34 }} />
-              )}
-            </button>
-          );
-        })}
-      </nav>
-
-      {/* Secondary nav within the active section. */}
-      <div className="mt-4 flex flex-wrap gap-2">
-        {section === "research"
-          ? RESEARCH_TABS.map((t) => (
-              <SubTab key={t.id} name={t.name} active={research === t.id} onSelect={() => setResearch(t.id)} />
-            ))
-          : DISCOVERY_TABS.map((t) => (
-              <SubTab key={t.id} name={t.name} active={discovery === t.id} onSelect={() => setDiscovery(t.id)} />
-            ))}
-      </div>
-
-      <div className="mt-8">
-        <AnimatePresence mode="wait">
-          <motion.section
-            key={`${section}:${section === "research" ? research : discovery}`}
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -8 }}
-            transition={{ duration: 0.2, ease: "easeOut" }}
-          >
-            {section === "research" ? (
-              research === "scribe" ? <ScribeView /> : research === "critic" ? <CriticView /> : research === "experimentalist" ? <ExperimentalistView /> : <WriterView />
-            ) : discovery === "web" ? (
-              <WebView />
-            ) : discovery === "cross-domain" ? (
-              <CrossDomainView />
-            ) : (
-              <SchedulerView onBotState={setBotState} />
-            )}
-          </motion.section>
-        </AnimatePresence>
-      </div>
-    </main>
-  );
-}
-
-function SubTab({ name, active, onSelect }: { name: string; active: boolean; onSelect: () => void }) {
-  return (
-    <button
-      type="button"
-      onClick={onSelect}
-      className={`rounded-full border px-3 py-1 text-[13px] transition-colors ${
-        active ? "border-accent/50 bg-accent-dim text-accent" : "border-border text-text-secondary hover:border-accent/30 hover:text-accent"
-      }`}
-    >
-      {name}
-    </button>
+              {section === "discovery" ? <DiscoveryShell /> : <ResearchShell />}
+            </motion.section>
+          </AnimatePresence>
+        </div>
+      </main>
+    </LabProvider>
   );
 }

@@ -53,6 +53,7 @@ async function main(): Promise<void> {
   let withMetrics = 0;
   let zero = 0;
   let skipped = 0;
+  const skipErrorCounts = new Map<string, number>();
   for (let i = 0; i < libPapers.length; i++) {
     const p = libPapers[i];
     if (i > 0) await sleep(SPACING_MS);
@@ -65,8 +66,37 @@ async function main(): Promise<void> {
       );
     } catch (e) {
       skipped++;
-      console.log(`  SKIP ${p.title.slice(0, 50)} :: ${(e as Error).message.slice(0, 100)}`);
+      const msg = (e as Error).message.slice(0, 160);
+      skipErrorCounts.set(msg, (skipErrorCounts.get(msg) ?? 0) + 1);
+      console.log(`  SKIP ${p.title.slice(0, 50)} :: ${msg.slice(0, 100)}`);
     }
+  }
+
+  // EXPLICIT OUTCOME (machine-readable; the scheduler stores it). A zero-row
+  // result must always carry its explanation: "genuinely no metrics" and
+  // "every call failed" are different worlds, and the silent zero that hid a
+  // systemic 401 behind per-paper skips was the actual bug.
+  const dominantError = [...skipErrorCounts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
+  const outcome = {
+    library: lib.name,
+    papersProcessed: libPapers.length,
+    withMetrics,
+    zeroMetrics: zero,
+    skipped,
+    dominantError,
+  };
+  console.log(`\nMETRICS_OUTCOME_JSON: ${JSON.stringify(outcome)}`);
+  if (libPapers.length > 0 && skipped === libPapers.length) {
+    console.error(
+      `\nSYSTEMIC FAILURE: every one of ${libPapers.length} papers failed. Dominant error: ${dominantError}`,
+    );
+    console.error("Nothing was extracted; this run must not be recorded as a success.");
+    process.exit(1);
+  }
+  if (libPapers.length > 0 && withMetrics === 0 && skipped === 0) {
+    console.log(
+      `OUTCOME: no extractable metrics found; ${libPapers.length} papers scanned cleanly. This is a real result, not an error.`,
+    );
   }
 
   // Corpus-level coverage over this library's metrics.

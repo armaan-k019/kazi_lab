@@ -14,5 +14,13 @@ export {
 } from "./detection";
 export { buildCorpusSnapshot } from "./snapshot";
 export { scheduleApprovableRun, type ScheduleSummary, type ScheduledTaskSummary } from "./schedule";
-export { executeApprovedTasks, type ExecutionReport, type TaskExecutionResult } from "./execute";
+export {
+  claimTask,
+  deriveRunStatus,
+  executeApprovedTasks,
+  reapStaleExecutions,
+  syncRunStatus,
+  type ExecutionReport,
+  type TaskExecutionResult,
+} from "./execute";
 export { extractMetricsMultiLibrary, DEFAULT_FAN_OUT_LIBRARIES, type FanOutReport } from "./fan-out";

@@ -21,3 +21,10 @@ export {
   type ProjectionSelection,
   type SweepEntry,
 } from "./projection-select";
+export {
+  groupAbcCandidates,
+  candidateSignature,
+  type AbcCandidateLike,
+  type GroupedFinding,
+  type GroupedPairing,
+} from "./abc-grouping";

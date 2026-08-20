@@ -12,6 +12,7 @@ import {
   paperLibraries,
   paperMetrics,
   extractions,
+  schedulerTasks,
   synthesisRuns,
   webBuildRuns,
   writerRuns,
@@ -73,6 +74,30 @@ export async function buildCorpusSnapshot(now = new Date()): Promise<CorpusSnaps
     .then((r) => r.rows);
   const keyTermCountBy = new Map(keyTermCounts.map((r) => [r.library_id, r.c]));
 
+  // Latest completed metric-scan outcome per library, from the scheduler's own
+  // task history (commandResult.metricsOutcome, recorded at execution time).
+  const metricScanTasks = await db
+    .select({ scope: schedulerTasks.scope, completedAt: schedulerTasks.completedAt, commandResult: schedulerTasks.commandResult })
+    .from(schedulerTasks)
+    .where(and(eq(schedulerTasks.kind, "extract_metrics"), eq(schedulerTasks.status, "completed")))
+    .orderBy(desc(schedulerTasks.completedAt));
+  const scanBy = new Map<string, { at: Date; papersProcessed: number; withMetrics: number; skipped: number }>();
+  for (const t of metricScanTasks) {
+    const cr = t.commandResult as { metricsOutcome?: { papersProcessed?: number; withMetrics?: number; skipped?: number } } | null;
+    const o = cr?.metricsOutcome;
+    if (!o || typeof o.papersProcessed !== "number" || !t.completedAt) continue;
+    for (const libId of t.scope) {
+      if (!scanBy.has(libId)) {
+        scanBy.set(libId, {
+          at: t.completedAt,
+          papersProcessed: o.papersProcessed,
+          withMetrics: o.withMetrics ?? 0,
+          skipped: o.skipped ?? 0,
+        });
+      }
+    }
+  }
+
   const libSnapshots: LibrarySnapshot[] = [];
   for (const l of libs) {
     const latest = latestCompletedBy.get(l.id) ?? null;
@@ -94,6 +119,7 @@ export async function buildCorpusSnapshot(now = new Date()): Promise<CorpusSnaps
       papersAddedSinceSynthesis: papersAddedSince,
       papersWithKeyTerms: keyTermCountBy.get(l.id) ?? 0,
       metricRowCount: metricCountBy.get(l.id) ?? 0,
+      latestMetricScan: scanBy.get(l.id) ?? null,
     });
   }
 

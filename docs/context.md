@@ -71,6 +71,178 @@ run, ~$1 per proposal run), stored per task and never asserted as precise.
 
 ## Decisions
 
+### 2026-08-20 Addendum: one shared shell for both tabs, bot voice, walking presence
+Decision: the shell was extracted into shared components used by BOTH tabs
+(one implementation, two configurations): components/shell/app-shell.tsx
+(status bar, dock, rail, keyboard), shell/panel-registry.tsx (one registry;
+each entry declares tab: "discovery" | "research" | "both"), and
+shell/lab-context.tsx (a LabProvider above both tabs holding web data, the
+scheduler poll, activity, grouped findings, the research pipeline, shared
+selection, portal access, and the bot's state and voice). Discovery's
+primary region is the portal; Research's is a pipeline strip
+(components/research/pipeline-strip.tsx) showing the selected library's
+progression (papers -> synthesis -> critic -> metrics -> cross-domain ->
+experiment -> document), each stage clickable to its panel. Stage states come
+from /api/research/pipeline, which IMPORTS buildCorpusSnapshot and
+detectStaleStates from @kazi-lab/scheduler; the strip and the task queue can
+never disagree. Critic/experiment/document stages have no detection rules,
+so the route reports plain presence and age, inventing nothing. Cross-tab
+continuity: selecting a library in Research softly dims non-member papers in
+the portal (PortalApi.emphasizeLibrary; a highlight, never a camera move);
+an ego click in the portal preselects the paper's library for Research.
+Research panels: Libraries (new: list, create, rename, per-library glance),
+plus the existing Scribe/Critic/Experimentalist/Writer views wrapped as
+panels. DEVIATION, stated plainly: those four views keep their internal
+library pickers and layouts; migrating their internals to the collapsed-card
+discipline was not done in this pass (1751 lines of working UI; the shell,
+registry, selection, and pipeline architecture is in place to migrate them
+panel by panel without another structural change). Scheduler registers on
+BOTH tabs; the Critic panel badges unaudited syntheses from the pipeline
+route.
+Bot voice (lib/bot-speech.ts): state-driven, honest lines only. Every line
+is a function of live lab state and returns null when it cannot truthfully
+be said; numbers and names interpolate at render time. 11 idle-eligible
+lines (6 idle observations, 1 discovery, 4 no-assertion personality lines)
+picked by seeded weighted choice, never repeating the last line, on a
+generous idle interval (75s plus jitter); event lines (task start, task
+done with elapsed and row counts from the recorded metricsOutcome, task
+failed, new grouped findings, proposal outcomes) fire immediately from
+observed scheduler-state transitions in the LabProvider poll. Clicking the
+bot speaks a status summary. The bubble is a soft card with a tail,
+25ms-per-character typewriter reveal (click to skip), length-scaled hold,
+fade-out, one bubble at a time. Blips (lib/bot-blip.ts) are procedural Web
+Audio (triangle, fast envelope, jittered pitch, per-profile pitch shift),
+MUTED BY DEFAULT with a visible persistent toggle, and the AudioContext is
+only created inside the toggle's click (the user gesture). Real
+text-to-speech via the Web Speech API was deliberately NOT implemented: it
+grates on repetition and cannot be tuned.
+Walking presence: the bot paces a floor line (wander depth cut to 0.12 of
+the lateral range), walks faster as activity rises (waddle speed driven by
+the live activity level), keeps the success hop and failure deflate, and
+yields (fades to 0.25 opacity) when the cursor approaches its patch so it
+never blocks content. Its home is the primary region's bottom-right corner
+on both tabs.
+Consequences: page.tsx lost the Research sub-tabs (panels replace them);
+the four wrapped views render inside the 440px dock and scroll, which is
+serviceable but cramped until their card-discipline migration. The old
+discovery-context and discovery/panel-registry files were deleted in favor
+of the shell versions; a parallel shell copy does not exist.
+
+### 2026-08-20 Discovery became an application shell; ABC findings group deterministically
+Decision: the Discovery tab is no longer a scrolling document. It is a shell:
+a one-line status bar (papers, communities, web age, grouped finding count,
+scheduler state, live activity dot; every segment is a jump target), the
+portal as the dominant surface (fills the viewport under the status bar), and
+a DOCKED PANEL AREA holding one panel at a time. The dock sits on the SIDE
+(right, 440px at lg and up) rather than the bottom because the portal is a 3D
+view: horizontal space costs it far less than vertical, and findings read
+naturally as a column; below lg the dock drops beneath the portal. The six
+stat boxes moved intact into a Diagnostics panel (relocated, not deleted);
+Cross-Domain became a panel; the old Web/Cross-Domain/Scheduler sub-tabs are
+gone. In fullscreen (now targeting the whole stage), the dock overlays as a
+translucent card instead of disappearing. Keyboard: Esc clears the shared
+selection, [ and ] cycle panels, 1..4 jump; documented in the rail's "?" hint.
+The panel registry is the growth surface. Each entry declares { id, label,
+icon, order, component, badge?, enabled? } and the shell renders rail and
+content purely from the array; panels read shared state from useDiscovery()
+and take no props. Worked example, adding a Grasshopper panel:
+  function GrasshopperPanel() { const ctx = useDiscovery(); return <...>; }
+  PANEL_REGISTRY.push({ id: "grasshopper", label: "Grasshopper", icon: "GH",
+    order: 6, component: GrasshopperPanel });
+Nothing else changes. A disabled Fabrication entry (enabled: () => false,
+rendering a "coming in Phase 3" note) ships as the live proof of the path.
+Panel choice persists in localStorage (kazi.discovery.panel).
+Discovery aggregation: ABC candidates group by a computed signature (the
+unordered community pair + the sorted set of bridge B concepts + the sorted
+evidence-paper id set), in packages/agents/web/src/abc-grouping.ts, pure and
+unit-tested (5 tests), exported via the "./abc-grouping" subpath so client
+code never pulls the agent barrel (Anthropic SDK, pg) into the bundle. Never
+an LLM summarization pass; nothing discarded, pairings nest inside their
+group with provenance indices. On the real run (8412b5ce): 20 raw candidates
+collapse to 7 findings; the mesh fragmentation is one finding with 8 nested
+pairings (bigger than the 5 visible on screen), and a second fan-out
+(next-token-prediction, 6 pairings) collapsed too. Collapsed cards are three
+lines (relationship headline from community labels, bridges + best score,
+pairings/papers/distance-factor meta); evidence sits behind a disclosure with
+counts; the score formula shows only expanded.
+Bidirectional selection is ONE shared value in the shell's context
+({ kind: "finding", signature } | { kind: "paper", refId } | null): hovering
+a finding previews its thought in the portal, clicking pins it; an
+ego-network click in the portal sets the paper selection, which switches to
+and filters the Discoveries panel ("involving <paper>" chip); Esc or the
+chip's clear resets both sides through the same setter, which also clears the
+portal highlight via the PortalApi.
+Bot: home is the portal's bottom-right corner (on the dark field, clear of
+the bottom-left legend), clicking it opens the Scheduler panel. Wandering is
+livelier: interval band 5-12s to 2.5-7s, default wander radius 0.55 to 0.7,
+and wanders chain into extra legs with probability 0.5 (direction changes).
+Antic interval band 7-15s to 5-11s, plus three new antics (peck_nod toward
+the panel edge, blink_stretch, notice_wave toward the cursor), same
+anticipation/action/settle discipline, idle-only, never twice in a row,
+auto-listed on /bot-test.
+Consequences: web-view.tsx is deleted; its capabilities (rebuild, propose,
+outcome diagnostics, stats, discoveries, ABC list) all live in the shell's
+panels. The header gains a compact mode for the shell's vertical budget. The
+raw pairing list is still fully visible inside expanded findings, so nothing
+the previous UI showed is lost.
+
+### 2026-08-19 Living portal, bot locomotion and personalities, scheduler concurrency closed out
+Decision: four coupled changes. (A) Orbit now follows grab-the-world viewport
+convention behind explicit constants (ORBIT_INVERT_X/Y both true,
+ORBIT_ROTATE_SPEED 0.9, ZOOM_INVERT false; OrbitControls cannot split axes,
+so mismatched flags fall back to X with a console warning). (B) The portal
+gained grounded synaptic activity: shader-driven pulses along existing edges
+(per-edge seeded phase, bridges at 6x intra density), degree-weighted
+spontaneous firing whose cascades walk ONLY the drawn-edge adjacency the
+ego-network uses, and ABC "thoughts" that replay real candidates (A-leg
+papers, then the bridging edges that actually exist, then C-leg papers) with
+a caption, round-robin in idle so every discovery gets airtime; activity
+level (pulse density, cascade rate, bloom strength) derives from polled
+scheduler state, and a completed graph-affecting task fires one cascade
+seeded at the affected library's highest-degree member node (node library
+membership added to the web/latest payload for exactly this grounding).
+Grounding is enforced by construction: node indices only come from
+indexByRef on real refIds, cascades only read `adjacency`, and thought edges
+are found by endpoint membership in the drawn edge lists; absent connections
+simply do not light. (C) The bot waddles (roll, bob, alternating foot lifts,
+counter-swinging flippers, center-pulled wandering inside a margin), plays
+nine antics (stretch_yawn, spin_dizzy, hop, look_around, slip_recover,
+follow_cursor, sneeze, sit_stand, flutter_lift), each an
+anticipation/action/settle timeline that starts and ends neutral, idle-only,
+never twice in a row, cancelled by real states via a 250ms fade; four
+personality profiles (calm, curious, playful, focused) are pure coefficient
+sets, with PROFILE_FOLLOWS_LAB_STATE snapping to focused while the lab
+works. /bot-test gained the profile picker, per-antic fire buttons, waddle
+toggle, and four new sliders. (D) executeApprovedTasks is concurrency-safe
+at the database level: tasks are claimed via a conditional UPDATE ... WHERE
+status = 'approved' RETURNING (two-caller race unit-tested against the real
+database; exactly one wins), run status is DERIVED from task statuses (a run
+with tasks in flight reports executing), and a stale-execution reaper fails
+tasks stuck beyond their timeout plus margin so a crashed process cannot
+wedge the queue.
+Reasoning: run b330c73d was double-executed by my CLI racing a UI click.
+The verbatim generative-3d zero-rows cause, from the stored task output:
+every paper SKIPped with 401 {"type":"error","error":{"type":
+"authentication_error","message":"API key is invalid."}}. The racing
+executor's environment carried the revoked ANTHROPIC_API_KEY (process env
+overrides .env.local by design), and the extract-metrics CLI treated a
+systemic all-papers failure as benign per-paper skips and exited 0. Fixes at
+the cause: the CLI now prints a machine-readable METRICS_OUTCOME_JSON line,
+exits nonzero when EVERY paper failed (naming the dominant error), and
+prints an explicit "no extractable metrics found; N papers scanned" when a
+clean zero is the honest result; the scheduler stores the outcome and
+detection suppresses re-queuing only for clean zero scans (skips still owe a
+real attempt; both behaviors unit-tested).
+Consequences: the fan-out completed once the valid-key executor re-ran the
+poisoned tasks: generative-3d 288 rows (it was never metrics-free), urban-heat
+910, cosmic-structure 353, spatial 837. The post-fan-out detection pass
+(run 8184c120) shows the loop working: metric extraction dropped off the
+queue entirely and the lab now proposes re-synthesizing cosmic-structure
+(~$2) and refreshing cross-domain synthesis (~$3), ~$5 total. Frame cost of
+the portal's brain is unmeasured here (no browser); it is one uniform set
+per line material and zero new draw calls, and __measureWebGraph() remains
+the probe.
+
 ### 2026-08-19 Visual redesign: clouds to atmosphere, arrows to a shader cue, bot to a character
 Decision: a pure visual-quality pass on the 3D web and the SchedulerBot after
 the human judged the first render bad. Deleted outright (not flagged off):

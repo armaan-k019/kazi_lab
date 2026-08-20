@@ -1,10 +1,11 @@
 "use client";
 
-import { useState } from "react";
-import { BOT_DEFAULTS, SchedulerBot, type BotTuning } from "@/components/scheduler/scheduler-bot";
+import { useRef, useState } from "react";
+import { BOT_DEFAULTS, PROFILES, SchedulerBot, type BotApi, type BotProfileName, type BotTuning } from "@/components/scheduler/scheduler-bot";
 import type { SchedulerBotState } from "@/lib/types";
 
 const STATES: SchedulerBotState[] = ["idle", "thinking", "loading", "success", "error"];
+const PROFILE_NAMES = Object.keys(PROFILES) as BotProfileName[];
 
 // The bot's tuning cockpit. Claude Code cannot see renders; every aesthetic
 // call here is the human's, made live with these controls. Once a combination
@@ -12,11 +13,21 @@ const STATES: SchedulerBotState[] = ["idle", "thinking", "loading", "success", "
 export default function BotTestPage() {
   const [state, setState] = useState<SchedulerBotState>("idle");
   const [tuning, setTuning] = useState<BotTuning>({ ...BOT_DEFAULTS });
+  const [antics, setAntics] = useState<string[]>([]);
+  const botApiRef = useRef<BotApi | null>(null);
   const set = <K extends keyof BotTuning>(key: K, value: BotTuning[K]) => setTuning((t) => ({ ...t, [key]: value }));
 
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-2xl flex-col items-center gap-8 px-6 py-12">
-      <SchedulerBot state={state} size={280} tuning={tuning} />
+      <SchedulerBot
+        state={state}
+        size={280}
+        tuning={tuning}
+        registerApi={(api) => {
+          botApiRef.current = api;
+          setAntics(api?.antics ?? []);
+        }}
+      />
 
       <div className="flex flex-wrap items-center justify-center gap-2">
         {STATES.map((s) => (
@@ -38,6 +49,12 @@ export default function BotTestPage() {
 
         <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
           <Toggle
+            label="profile"
+            options={PROFILE_NAMES}
+            value={tuning.profile}
+            onChange={(v) => set("profile", v as BotProfileName)}
+          />
+          <Toggle
             label="face"
             options={["beak", "mouth"]}
             value={tuning.faceStyle}
@@ -53,6 +70,9 @@ export default function BotTestPage() {
             <input type="checkbox" checked={tuning.cheeks} onChange={(e) => set("cheeks", e.target.checked)} /> cheeks
           </label>
           <label className="flex items-center gap-1.5 text-[12px] text-text-secondary">
+            <input type="checkbox" checked={tuning.waddle} onChange={(e) => set("waddle", e.target.checked)} /> waddle
+          </label>
+          <label className="flex items-center gap-1.5 text-[12px] text-text-secondary">
             body green
             <input type="color" value={tuning.bodyGreen} onChange={(e) => set("bodyGreen", e.target.value)} className="h-6 w-10 cursor-pointer rounded border border-border bg-transparent" />
             <span className="font-mono text-[10px] text-text-muted">{tuning.bodyGreen}</span>
@@ -65,7 +85,29 @@ export default function BotTestPage() {
           <Slider label="eye height" min={-0.15} max={0.25} step={0.01} value={tuning.eyeHeight} onChange={(v) => set("eyeHeight", v)} />
           <Slider label="bounce amplitude" min={0.5} max={1.5} step={0.01} value={tuning.bounceAmplitude} onChange={(v) => set("bounceAmplitude", v)} />
           <Slider label="breathing speed" min={0.5} max={2} step={0.01} value={tuning.breathingSpeed} onChange={(v) => set("breathingSpeed", v)} />
+          <Slider label="waddle roll (deg)" min={2} max={16} step={0.5} value={tuning.waddleRollDeg} onChange={(v) => set("waddleRollDeg", v)} />
+          <Slider label="waddle speed" min={0.5} max={2} step={0.01} value={tuning.waddleSpeed} onChange={(v) => set("waddleSpeed", v)} />
+          <Slider label="antic frequency" min={0} max={3} step={0.05} value={tuning.anticFrequency} onChange={(v) => set("anticFrequency", v)} />
+          <Slider label="wander radius" min={0.1} max={1} step={0.01} value={tuning.wanderRadius} onChange={(v) => set("wanderRadius", v)} />
         </div>
+
+        {antics.length > 0 && (
+          <div>
+            <p className="text-[11px] font-medium uppercase tracking-wide text-text-muted">fire an antic (plays immediately)</p>
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {antics.map((name) => (
+                <button
+                  key={name}
+                  type="button"
+                  onClick={() => botApiRef.current?.fireAntic(name)}
+                  className="rounded-full border border-border px-2.5 py-0.5 text-[11px] text-text-secondary transition-colors hover:border-accent/40 hover:text-accent"
+                >
+                  {name.replace(/_/g, " ")}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
 
         <button type="button" onClick={() => setTuning({ ...BOT_DEFAULTS })} className="rounded border border-border px-2 py-0.5 text-[11px] text-text-secondary transition-colors hover:border-accent/40 hover:text-accent">
           reset to defaults

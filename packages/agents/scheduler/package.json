@@ -10,7 +10,7 @@
     "detect": "tsx src/detect-cli.ts",
     "execute": "tsx src/execute-cli.ts",
     "fan-out": "tsx src/fan-out-cli.ts",
-    "test": "tsx --test src/detection.test.ts"
+    "test": "tsx --test src/detection.test.ts src/concurrency.test.ts"
   },
   "dependencies": {
     "@kazi-lab/db": "workspace:*",
