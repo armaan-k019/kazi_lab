@@ -2,6 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { groupAbcCandidates, type GroupedFinding } from "@kazi-lab/web-graph/abc-grouping";
+import { AMBIENT } from "@/lib/design-tokens";
 import type { PipelineLibrary, ResearchPipeline, SchedulerBotState, SchedulerLatest, WebLatest, WebProposeDiagnostics, WebProposeOutcome } from "@/lib/types";
 import { newFindingsLine, taskDoneLine, taskFailedLine, taskStartLine } from "@/lib/bot-speech";
 import type { PortalApi } from "@/components/web/web-graph-3d";
@@ -59,6 +60,14 @@ export type LabContextValue = {
   // Bot.
   botState: SchedulerBotState;
   setBotState: (s: SchedulerBotState) => void;
+  // Ambient field intensity multiplier (dev-tunable).
+  ambientActivityScale: number;
+  setAmbientActivityScale: (x: number) => void;
+  // The portal window's measured screen rect (Discovery's primary region).
+  // The environment field clips itself to this box in focus mode so nothing
+  // it draws (label sprites included) can escape into the header or dock.
+  portalRect: { top: number; left: number; width: number; height: number } | null;
+  setPortalRect: (r: { top: number; left: number; width: number; height: number } | null) => void;
   // The bot's voice: say() replaces the current bubble; speech is the live
   // utterance (id increments so equal text still re-triggers).
   speech: { id: number; text: string } | null;
@@ -88,6 +97,8 @@ export function LabProvider({ children }: { children: React.ReactNode }) {
   const [proposing, setProposing] = useState(false);
   const [proposeOutcome, setProposeOutcome] = useState<WebProposeOutcome | null>(null);
   const [speech, setSpeech] = useState<{ id: number; text: string } | null>(null);
+  const [ambientActivityScale, setAmbientActivityScale] = useState<number>(AMBIENT.activityScale);
+  const [portalRect, setPortalRect] = useState<{ top: number; left: number; width: number; height: number } | null>(null);
   const speechIdRef = useRef(0);
   const portalApiRef = useRef<PortalApi | null>(null);
   const panelOpenerRef = useRef<((id: string) => void) | null>(null);
@@ -279,6 +290,10 @@ export function LabProvider({ children }: { children: React.ReactNode }) {
     proposeOutcome,
     botState,
     setBotState,
+    ambientActivityScale,
+    setAmbientActivityScale,
+    portalRect,
+    setPortalRect,
     speech,
     say,
     paperTitle: (refId: string) => paperTitleBy.get(refId) ?? null,

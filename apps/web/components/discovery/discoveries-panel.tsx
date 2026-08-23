@@ -3,26 +3,29 @@
 import { useMemo, useState } from "react";
 import type { GroupedFinding } from "@kazi-lab/web-graph/abc-grouping";
 import type { WebProposeDiagnostics, WebProposeOutcome } from "@/lib/types";
+import { COLOR, STATUS } from "@/lib/design-tokens";
 import { useLab } from "@/components/shell/lab-context";
 
 // ---------------------------------------------------------------------------
-// Discoveries panel: deterministic grouped findings (never an LLM summary),
-// audited crossover proposals, and the propose action. A collapsed finding is
-// three scannable lines; everything else is nested behind disclosures.
+// Discoveries panel, editorial skin. Structure is UNCHANGED from the grouping
+// work: three scannable lines per collapsed finding, pairings and evidence
+// nested behind disclosures, proposals below. Cards are gone; findings are
+// entries separated by hairline rules and whitespace, selection is a green
+// rule at the left edge.
 // ---------------------------------------------------------------------------
 
 function verdictColor(v: string | null): string {
-  if (v === "confirmed" || v === "promoted") return "var(--accent)";
-  if (v === "demoted") return "#b07a4f";
-  if (v === "rejected") return "#b4493b";
-  return "var(--text-muted)";
+  if (v === "confirmed" || v === "promoted") return STATUS.okText;
+  if (v === "demoted") return STATUS.stale;
+  if (v === "rejected") return STATUS.missing;
+  return STATUS.neutral;
 }
 
 function serviceColor(status: string): string {
-  if (status === "ok") return "#6fb08a";
-  if (status === "degraded") return "#b07a4f";
-  if (status === "unavailable") return "#b4493b";
-  return "var(--text-muted)";
+  if (status === "ok") return STATUS.okText;
+  if (status === "degraded") return STATUS.stale;
+  if (status === "unavailable") return STATUS.missing;
+  return STATUS.neutral;
 }
 
 export function DiscoveriesPanel() {
@@ -41,13 +44,13 @@ export function DiscoveriesPanel() {
   const discoveries = data?.discoveries ?? [];
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-center gap-2">
+    <div className="space-y-10">
+      <div className="flex flex-wrap items-center gap-3">
         <button
           type="button"
           onClick={() => void propose()}
           disabled={proposing || !data?.run}
-          className="rounded-lg border border-border px-3 py-1.5 text-[13px] font-medium text-text-secondary transition-colors hover:border-accent/40 hover:text-accent disabled:cursor-default disabled:opacity-50"
+          className="rounded-(--radius-control) border border-hairline-strong px-3 py-1.5 text-ui font-medium text-ink-600 transition-colors duration-(--motion-disclose) hover:border-green hover:text-green-deep disabled:cursor-default disabled:opacity-50"
         >
           {proposing ? "Proposing…" : "Propose crossovers"}
         </button>
@@ -57,30 +60,29 @@ export function DiscoveriesPanel() {
       {proposeOutcome && <ProposeOutcomePanel outcome={proposeOutcome} />}
 
       {paperFilter && (
-        <div className="flex items-center gap-2 rounded-lg border border-accent/30 bg-accent-dim/40 px-3 py-1.5">
-          <span className="truncate text-[12px] text-text-secondary" title={paperTitle(paperFilter) ?? paperFilter}>
-            involving: <span className="text-text-primary">{paperTitle(paperFilter) ?? "selected paper"}</span>
+        <div className="flex items-center gap-2 border-l-2 border-green pl-3">
+          <span className="truncate text-small text-ink-600" title={paperTitle(paperFilter) ?? paperFilter}>
+            involving: <span className="text-ink">{paperTitle(paperFilter) ?? "selected paper"}</span>
           </span>
-          <button type="button" onClick={() => setSelection(null)} className="ml-auto shrink-0 text-[11px] text-text-muted underline-offset-2 hover:text-accent hover:underline">
+          <button type="button" onClick={() => setSelection(null)} className="ml-auto shrink-0 text-caption text-ink-500 underline-offset-2 hover:text-green-deep hover:underline">
             clear
           </button>
         </div>
       )}
 
-      {/* Grouped ABC findings: the deterministic collapse. */}
+      {/* Grouped ABC findings: the deterministic collapse, restyled only. */}
       <section>
-        <p className="text-[11px] font-medium uppercase tracking-wide text-text-muted">
-          Cross-domain findings ({visibleGroups.length}
-          {paperFilter ? ` of ${groups.length}` : ""}) · deterministic, distance-forced
+        <p className="caps-label">
+          Cross-domain findings <span className="font-mono">{visibleGroups.length}{paperFilter ? ` of ${groups.length}` : ""}</span>
         </p>
         {visibleGroups.length === 0 && (
-          <p className="mt-2 text-[13px] text-text-muted">
+          <p className="mt-3 text-ui text-ink-500">
             {paperFilter ? "No findings involve this paper." : "No ABC candidates in this build."}
           </p>
         )}
-        <div className="mt-2 space-y-2">
+        <div className="mt-3 divide-y divide-hairline">
           {visibleGroups.map((g) => (
-            <FindingCard
+            <FindingEntry
               key={g.signature}
               group={g}
               labelOf={labelOf}
@@ -99,25 +101,23 @@ export function DiscoveriesPanel() {
       {/* Audited crossover proposals (existing capability, unchanged data). */}
       {discoveries.length > 0 && (
         <section>
-          <p className="text-[11px] font-medium uppercase tracking-wide text-text-muted">Crossover proposals (audited by the cross-domain Critic)</p>
-          <div className="mt-2 space-y-2">
+          <p className="caps-label">Crossover proposals · audited by the cross-domain critic</p>
+          <div className="mt-3 divide-y divide-hairline">
             {discoveries.map((d) => (
-              <div key={d.id} className="rounded-xl border border-border bg-surface p-3">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="rounded-full px-2 py-0.5 text-[11px] font-medium" style={{ color: "#b07a4f", backgroundColor: "var(--surface-raised)" }}>
-                    {d.verdict ? `critic: ${d.verdict}` : "candidate · needs pressure-testing"}
-                  </span>
-                  <span className="rounded-full border border-border px-2 py-0.5 text-[11px] text-text-secondary">{d.level}</span>
-                  {d.verdict && <span className="text-[11px]" style={{ color: verdictColor(d.verdict) }}>{d.verdict}</span>}
+              <div key={d.id} className="py-4 first:pt-0">
+                <div className="flex flex-wrap items-center gap-2 text-caption">
+                  <span style={{ color: verdictColor(d.verdict) }}>{d.verdict ? `critic: ${d.verdict}` : "candidate · needs pressure-testing"}</span>
+                  <span className="text-ink-400">·</span>
+                  <span className="text-ink-500">{d.level}</span>
                 </div>
-                <p className="mt-2 text-[13px] font-medium leading-snug text-text-primary">{d.summary}</p>
-                {d.rationale && <p className="mt-1 text-[12px] leading-relaxed text-text-secondary">{d.rationale}</p>}
+                <p className="mt-1.5 font-display text-lead leading-snug text-ink">{d.summary}</p>
+                {d.rationale && <p className="mt-1 text-small leading-relaxed text-ink-600">{d.rationale}</p>}
                 {d.evidence.length > 0 && (
-                  <details className="mt-2 border-t border-border pt-2">
-                    <summary className="cursor-pointer text-[11px] text-text-muted">evidence ({d.evidence.length})</summary>
+                  <details className="mt-2">
+                    <summary className="cursor-pointer text-caption text-ink-500">evidence ({d.evidence.length})</summary>
                     <ul className="mt-1 space-y-1">
                       {d.evidence.map((e, i) => (
-                        <li key={i} className="text-[12px] text-text-secondary"><span className="text-text-muted">{e.kind}:</span> {(e.excerpt ?? e.ref).slice(0, 140)}</li>
+                        <li key={i} className="text-small text-ink-600"><span className="text-ink-500">{e.kind}:</span> {(e.excerpt ?? e.ref).slice(0, 140)}</li>
                       ))}
                     </ul>
                   </details>
@@ -131,9 +131,9 @@ export function DiscoveriesPanel() {
   );
 }
 
-// A grouped finding. Collapsed: three visual lines, scannable at a glance.
-// Expanded (disclosure): every nested pairing, the evidence, the formula.
-function FindingCard({
+// A grouped finding as an editorial entry. Collapsed: the same three visual
+// lines. Selected: a green rule at the left, not a border box.
+function FindingEntry({
   group,
   labelOf,
   selected,
@@ -154,54 +154,54 @@ function FindingCard({
   return (
     <div
       onMouseEnter={onHover}
-      className={`rounded-xl border bg-surface p-3 transition-colors ${selected ? "border-accent/60" : "border-border hover:border-accent/30"}`}
+      className={`py-4 pl-3 transition-colors duration-(--motion-disclose) first:pt-0 ${selected ? "border-l-2 border-green" : "border-l-2 border-transparent"}`}
       title="hover previews the chain in the portal; click pins it"
     >
       <button type="button" onClick={onSelect} className="block w-full text-left">
-        {/* Line 1: the relationship headline. */}
-        <p className="text-[13px] font-medium leading-snug text-text-primary">
-          {labelOf(group.communityPair[0])} <span className="text-accent">&lt;-&gt;</span> {labelOf(group.communityPair[1])}
+        {/* Line 1: the relationship headline, in display type. */}
+        <p className="font-display text-title leading-tight text-ink">
+          {labelOf(group.communityPair[0])} <span className="text-green-deep">&lt;-&gt;</span> {labelOf(group.communityPair[1])}
         </p>
         {/* Line 2: bridge concepts + best score. */}
-        <p className="mt-0.5 truncate text-[12px] text-text-secondary" title={group.bridgeConcepts.join(", ")}>
-          via <span className="text-text-primary">{group.bridgeConcepts.join(", ")}</span>
-          <span className="text-text-muted"> · best {group.bestScore.toFixed(2)}</span>
+        <p className="mt-1 truncate text-ui text-ink-600" title={group.bridgeConcepts.join(", ")}>
+          via <span className="text-ink">{group.bridgeConcepts.join(", ")}</span>
+          <span className="text-ink-500"> · best <span className="font-mono text-small">{group.bestScore.toFixed(2)}</span></span>
         </p>
-        {/* Line 3: meta, distance factor prominent. */}
-        <p className="mt-0.5 text-[11px] text-text-muted">
-          {group.pairings.length} pairing{group.pairings.length === 1 ? "" : "s"} · {group.evidence.distinctPaperCount} papers
+        {/* Line 3: meta, distance factor prominent, machine numbers in mono. */}
+        <p className="mt-1 text-caption text-ink-500">
+          <span className="font-mono">{group.pairings.length}</span> pairing{group.pairings.length === 1 ? "" : "s"} · <span className="font-mono">{group.evidence.distinctPaperCount}</span> papers
           {group.distanceFactor !== null && (
-            <span className="ml-1.5 rounded-full border border-border px-1.5 py-px font-mono text-[10px] text-text-secondary">distance x{group.distanceFactor.toFixed(2)}</span>
+            <span className="ml-2 font-mono text-micro text-green-deep">distance x{group.distanceFactor.toFixed(2)}</span>
           )}
         </p>
       </button>
 
-      <button type="button" onClick={() => setExpanded((v) => !v)} className="mt-1.5 text-[11px] text-text-muted underline-offset-2 hover:text-text-secondary hover:underline">
+      <button type="button" onClick={() => setExpanded((v) => !v)} className="mt-1.5 text-caption text-ink-500 underline-offset-2 transition-colors duration-(--motion-disclose) hover:text-ink hover:underline">
         {expanded ? "collapse" : `details (${group.pairings.length} pairings)`}
       </button>
 
       {expanded && (
-        <div className="mt-2 space-y-2 border-t border-border pt-2">
+        <div className="mt-3 space-y-2 pl-1">
           <ul className="space-y-0.5">
             {group.pairings.map((p, i) => (
-              <li key={i} className="text-[12px] text-text-secondary">
-                {p.aLabel} <span className="text-accent">&lt;-&gt;</span> {p.cLabel}
-                <span className="font-mono text-[10px] text-text-muted"> {p.score.toFixed(3)}</span>
+              <li key={i} className="text-small text-ink-600">
+                {p.aLabel} <span className="text-green-deep">&lt;-&gt;</span> {p.cLabel}
+                <span className="ml-1 font-mono text-micro text-ink-500">{p.score.toFixed(3)}</span>
               </li>
             ))}
           </ul>
           {best.baseScore !== null && group.distanceFactor !== null && (
-            <p className="font-mono text-[10px] text-text-muted">
+            <p className="font-mono text-micro text-ink-500">
               score = base {best.baseScore.toFixed(3)} x distance {group.distanceFactor.toFixed(2)}
             </p>
           )}
-          <button type="button" onClick={() => setShowEvidence((v) => !v)} className="text-[11px] text-text-muted underline-offset-2 hover:text-text-secondary hover:underline">
+          <button type="button" onClick={() => setShowEvidence((v) => !v)} className="text-caption text-ink-500 underline-offset-2 hover:text-ink hover:underline">
             {showEvidence
               ? "hide evidence"
               : `evidence (${group.evidence.distinctPaperCount} papers across ${(group.evidence.aPapers.length > 0 ? 1 : 0) + (group.evidence.cPapers.length > 0 ? 1 : 0)} legs)`}
           </button>
           {showEvidence && (
-            <div className="space-y-1.5">
+            <div className="space-y-2">
               <EvidenceLeg label="A leg" papers={group.evidence.aPapers} openPaper={openPaper} />
               <EvidenceLeg label="C leg" papers={group.evidence.cPapers} openPaper={openPaper} />
             </div>
@@ -216,16 +216,16 @@ function EvidenceLeg({ label, papers, openPaper }: { label: string; papers: { id
   if (papers.length === 0) return null;
   return (
     <div>
-      <p className="text-[10px] font-medium uppercase tracking-wide text-text-muted">{label}</p>
-      <ul className="mt-0.5 space-y-0.5">
+      <p className="caps-label">{label}</p>
+      <ul className="mt-1 space-y-0.5">
         {papers.map((p, i) => (
-          <li key={i} className="truncate text-[12px]" title={p.title}>
+          <li key={i} className="truncate text-small" title={p.title}>
             {p.id ? (
-              <button type="button" onClick={() => openPaper(p.id!)} className="max-w-full truncate text-left text-text-secondary underline-offset-2 hover:text-accent hover:underline">
+              <button type="button" onClick={() => openPaper(p.id!)} className="max-w-full truncate text-left text-ink-600 underline-offset-2 hover:text-green-deep hover:underline">
                 {p.title}
               </button>
             ) : (
-              <span className="text-text-secondary">{p.title}</span>
+              <span className="text-ink-600">{p.title}</span>
             )}
           </li>
         ))}
@@ -234,70 +234,70 @@ function EvidenceLeg({ label, papers, openPaper }: { label: string; papers: { id
   );
 }
 
-// The last proposal run's outcome (moved intact from the old web view): the
-// REAL reason and stage, with the stage-by-stage diagnostics behind "why".
+// The last proposal run's outcome (unchanged content, editorial dress: a
+// toned rule instead of a card).
 export function ProposeOutcomePanel({ outcome }: { outcome: WebProposeOutcome }) {
   const [showWhy, setShowWhy] = useState(false);
-  const tone = outcome.kind === "failed" ? "#b4493b" : outcome.kind === "nothing" ? "#b07a4f" : "var(--accent)";
+  const tone = outcome.kind === "failed" ? COLOR.missing : outcome.kind === "nothing" ? COLOR.warm : COLOR.greenDeep;
   return (
-    <div className="rounded-xl border border-border bg-surface p-3">
+    <div className="border-l-2 pl-3" style={{ borderColor: tone }}>
       <div className="flex flex-wrap items-center gap-2">
-        <span className="rounded-full px-2 py-0.5 text-[11px] font-medium" style={{ color: tone, backgroundColor: "var(--surface-raised)" }}>
+        <span className="text-caption font-medium" style={{ color: tone }}>
           {outcome.kind === "completed" ? "proposal run completed" : outcome.kind === "nothing" ? "nothing to propose" : `failed at stage: ${outcome.stage ?? "unknown"}`}
         </span>
         {outcome.diagnostics && (
-          <button type="button" onClick={() => setShowWhy((s) => !s)} className="text-[11px] text-text-muted underline-offset-2 hover:text-text-secondary hover:underline">
+          <button type="button" onClick={() => setShowWhy((s) => !s)} className="text-caption text-ink-500 underline-offset-2 hover:text-ink hover:underline">
             {showWhy ? "hide diagnostics" : "why?"}
           </button>
         )}
       </div>
-      <p className="mt-2 text-[13px] leading-relaxed text-text-primary">{outcome.message}</p>
-      {outcome.note && outcome.note !== outcome.message && <p className="mt-1 text-[12px] text-text-secondary">{outcome.note}</p>}
+      <p className="mt-1.5 text-ui leading-relaxed text-ink">{outcome.message}</p>
+      {outcome.note && outcome.note !== outcome.message && <p className="mt-1 text-small text-ink-600">{outcome.note}</p>}
       {showWhy && outcome.diagnostics && <ProposeDiagnostics d={outcome.diagnostics} />}
     </div>
   );
 }
 
 function ProposeDiagnostics({ d }: { d: WebProposeDiagnostics }) {
-  const stageTone = (s: string) => (s === "ok" ? "#6fb08a" : s === "failed" ? "#b4493b" : "#b07a4f");
+  const stageTone = (s: string) => (s === "ok" ? STATUS.okText : s === "failed" ? STATUS.missing : STATUS.stale);
   return (
-    <div className="mt-3 space-y-3 border-t border-border pt-3">
+    <div className="mt-3 space-y-4">
       <div>
-        <p className="text-[11px] font-medium uppercase tracking-wide text-text-muted">Pipeline stages</p>
+        <p className="caps-label">Pipeline stages</p>
         <ul className="mt-1 space-y-0.5">
           {d.stages.map((s, i) => (
-            <li key={i} className="font-mono text-[11px] text-text-secondary">
+            <li key={i} className="font-mono text-caption text-ink-600">
               <span style={{ color: stageTone(s.status) }}>[{s.status}]</span> {s.stage}
-              {s.note && <span className="text-text-muted"> · {s.note}</span>}
+              {s.note && <span className="text-ink-500"> · {s.note}</span>}
             </li>
           ))}
         </ul>
       </div>
       <div>
-        <p className="text-[11px] font-medium uppercase tracking-wide text-text-muted">Candidates</p>
-        <p className="mt-1 text-[12px] text-text-secondary">
-          {d.candidatesConsidered} considered · {d.proposalsFromModel} proposed by the model
+        <p className="caps-label">Candidates</p>
+        <p className="mt-1 text-small text-ink-600">
+          <span className="font-mono">{d.candidatesConsidered}</span> considered · <span className="font-mono">{d.proposalsFromModel}</span> proposed by the model
         </p>
         {d.dropped.length > 0 && (
           <ul className="mt-1 space-y-0.5">
             {d.dropped.map((x, i) => (
-              <li key={i} className="text-[11px] leading-relaxed text-text-muted">x{x.count} {x.reason}</li>
+              <li key={i} className="text-caption leading-relaxed text-ink-500">x{x.count} {x.reason}</li>
             ))}
           </ul>
         )}
       </div>
       <div>
-        <p className="text-[11px] font-medium uppercase tracking-wide text-text-muted">External services</p>
+        <p className="caps-label">External services</p>
         <ul className="mt-1 space-y-0.5">
           {d.services.map((s, i) => (
-            <li key={i} className="text-[11px] text-text-secondary">
+            <li key={i} className="text-caption text-ink-600">
               <span style={{ color: serviceColor(s.status) }}>{s.status}</span> {s.service}
-              <span className="text-text-muted"> · {s.reason}</span>
+              <span className="text-ink-500"> · {s.reason}</span>
             </li>
           ))}
         </ul>
-        <p className="mt-2 text-[11px] text-text-muted">
-          auto-critique: <span className="text-text-secondary">{d.critique}</span>
+        <p className="mt-2 text-caption text-ink-500">
+          auto-critique: <span className="text-ink-600">{d.critique}</span>
           {d.critiqueNote && <span> · {d.critiqueNote}</span>}
         </p>
       </div>
@@ -306,5 +306,5 @@ function ProposeDiagnostics({ d }: { d: WebProposeDiagnostics }) {
 }
 
 function Spinner() {
-  return <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-border border-t-accent" aria-hidden="true" />;
+  return <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-hairline border-t-green" aria-hidden="true" />;
 }

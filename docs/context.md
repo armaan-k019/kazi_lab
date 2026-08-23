@@ -71,6 +71,242 @@ run, ~$1 per proposal run), stored per task and never asserted as precise.
 
 ## Decisions
 
+### 2026-08-23 Portal containment; the scroll-driven narrative front door
+Decision, part 1 (containment): in focus mode the community label sprites
+projected outside the portal region and drew over the header, tab bar, and
+the translucent dock (they sit BELOW those layers in z-order, but the
+layers around DOM text are transparent, so z-order alone cannot occlude
+them). Fix: the Discovery primary region measures its own rect
+(ResizeObserver + resize, reported through the lab context as portalRect)
+and the environment field applies a clip-path inset to that box in focus
+mode, transitioned with the focus ease so the window opens smoothly.
+Ambient stays unclipped (it shows no text at all per A4) and fullscreen
+stays unclipped (it owns the viewport). The portal is now a clean window;
+nothing it draws escapes it.
+Decision, part 2 (the narrative): the story is the front door at "/" and
+the dashboard moved to /lab (git mv, otherwise untouched), linked both
+ways: a persistent "enter the lab" chip plus scene 5's door on the story,
+and a "the story" chip in the lab nav. Deep links
+/lab?view=research&library=<id> land on Research with the library
+preselected. The arc (six chapters over ~720vh, each a real-DOM section
+over ONE persistent canvas): hero (the name, an honest one-liner, the
+forest distant), corpus (live paper and community counts from
+/api/web/latest), worlds (the REAL botany trees from /api/research/
+pipeline + /api/botany, lush versus bare, each with an open-in-the-lab
+deep link), bridges (top grouped findings from the client grouping module
+over /api/web/latest, with the real Propose control inline), next (the
+real queued tasks and costs from /api/scheduler/latest with inline
+approve/defer against /api/scheduler/approve), enter (the door). Every
+number is live; every empty state has an honest fallback line.
+Scroll engine: a custom rAF-throttled scroll-progress hook writing into a
+ref the canvas consumes without re-rendering React, plus framer-motion
+(already a dependency) for the HTML fades; no new libraries. The camera
+interpolates smoothstep between keyframes along one journey; scenes are
+camera and content states, never mounts.
+The narrator: the existing bot (BotHome gained an optional BotApi
+passthrough) delivers ONE state-derived line per scene through its
+existing bubble (live numbers, honest fallbacks, never an invented claim)
+and a scene-cued antic from the existing table (wave at hero and the
+door, look-around in the forest, a peck-nod at the scheduler).
+Performance: the story canvas caps DPR at 1.5, two-level LOD per tree
+(full within 7 world units, the reduced-cap generation beyond), sway only
+near the camera, hidden-tab pause, and a 10ms rolling frame budget that
+degrades to render-on-scroll with a console warning. Worst case today (4
+trees, all full): ~85k effective vertices, ~40 draw calls; a 10-tree
+forest with LOD projects to roughly 190k effective vertices. Reduced
+motion is a first-class static path: one readable overview frame, no
+camera motion, no sway, no fades, the same real DOM content stacked.
+Untouched: the dashboard shells, the portal, packages/agents/*, the
+scheduler, the grouping module, and the botany generator core (consumed
+via its public functions only).
+
+### 2026-08-22 Ambient field shows ZERO text: label bleed-through fixed
+Decision: the 3D community label sprites leaked into ambient mode and
+collided with foreground content (notably the pipeline strip); the prior
+pass gated the DOM overlays (caption, legend, toolbar, tooltip) on focus
+but the labels are SCENE sprites driven only by camera-distance fade and
+were never mode-gated. The rule is now explicit: in ambient the field
+shows geometry, pulses, and glow, and ZERO text. Implementation: a
+labelModeFade value eases 0..1 with the mode inside the render loop and
+multiplies every label sprite's opacity (sprites also toggle visible), so
+labels vanish under the veil transition without popping and return in
+focus. Secondary backstop: an AMBIENT.textScrim token (0.38) lays a soft
+left-weighted wash of ground color behind the pipeline strip's text block
+(isolated stacking context so the scrim sits between the field and the
+text). Verified: every text overlay on the field is now behind a
+mode === "focus" gate or the labelModeFade; the label sprites were the
+only in-scene text.
+
+### 2026-08-21 Botany generator: libraries as trees, grown from real state; tone restored
+Decision: three regression fixes, a token-level tone restoration, and a new
+STANDALONE data-driven botany generator on /botany-test. The dashboard, the
+portal, the agents, the scheduler, and the grouping module are untouched
+(no edits to web-graph-3d.tsx, environment-field, abc-grouping, packages/
+agents/*, or any API route except the new read-only /api/botany).
+Fixes: panel-rail tabs no longer wrap or clip (shrink-0 + whitespace-nowrap
+in a scrollable rail); the bot's speech bubble measures itself after render
+and clamps/flips inside the viewport with a 12px margin token; the bot's
+home moved to a bottom-4/right-4 margin and its waddle position is
+hard-clamped to its wander bounds every frame.
+Tone: the editorial serif drifted corporate-serious and is reverted; ONE
+friendly sans (Nunito, rounded and warm, weight 800 in the display
+register) now serves display and body, mono stays for computed values.
+Token changes: ground #0A0F0C to #0C120E (warmer), green core #37C186 to
+#3DD68C and green text #8FD9B0 to #93E0B6 (livelier; 10.10 and 12.25 on the
+new ground, all AA), green glow alpha 0.12 to 0.16, radius control 6 to
+10px / glass 12 to 16px / bubble 14 to 16px (rounder, friendlier), glass
+blur 16 to 14px with fill 0.045 to 0.055 (lighter), display tracking
+-0.024 to -0.015em, motion ease to a gentle soft-out curve.
+THE BOTANY MAPPING (deterministic; seed = FNV-1a 32-bit of the library
+uuid; same library = same tree every render; every rule tunable in
+apps/web/lib/botany-config.ts, nothing random or hallucinated):
+  paper count               -> primary branches, height, trunk girth
+  internal citation density -> recursion depth, children per node, canopy
+                               fullness (real edges among the library's own
+                               papers, from the citations table)
+  synthesis done            -> in leaf; missing -> bare with buds (an
+                               intentional winter tree, never an error)
+  critic done               -> full healthy foliage; missing -> sparse and
+                               desaturated
+  metric rows (bucketed at 1/100/400/800) -> fruit count
+  cross-domain done         -> blossoms
+  experiment + document     -> canopy glow
+  community                 -> foliage hue (community palette color mixed
+                               35 percent toward the living green)
+Real-corpus readout at defaults (the honesty check): cosmic-structure
+(synthesis and critic missing) renders BARE with buds, 132 branch segments
+and 7 buds, versus spatial (fully pipelined) in leaf with 512 leaves, 12
+fruit, and canopy glow; generative-3d's dense internal citations (3.84 per
+paper) produce the deepest, fullest canopy; urban-heat leafs sparsely
+(critic missing) but carries the most fruit (910 metric rows). A hard
+geometry budget (maxBranchSegments 900, maxTips 320) stops combinatorial
+fan-out gracefully: the densest tree is ~44k effective vertices and a
+10-tree forest projects to ~214k effective vertices and ~50 draw calls
+(instanced: one InstancedMesh per organ per tree).
+Bridges: cross-domain links between two libraries render as a green vine
+arc between canopies, radius and opacity scaling with link count, from the
+REAL cross_domain_links pairs (three pairs exist today); if no link exists
+between a pair the page says so and draws nothing.
+The tuning surface (the lesson from the stipple failure, institutionalized
+again): /botany-test renders any real library live, switches libraries,
+offers a two-trees-plus-bridge mode, exposes EVERY numeric and color
+tunable as a live control generated from the config object itself so none
+can be forgotten, shows the derived-params readout next to each tree, and
+exports the tuned values as a copyable config diff for baking into
+BOTANY_DEFAULTS. The scroll-driven narrative that arranges these trees is
+the next prompt; this one ships the artifact in isolation.
+
+### 2026-08-20 Direction replaced: dark spatial environment; the stipple failure recorded as a lesson
+Decision: the ink-and-paper pass failed in execution and is replaced, skin
+only again (IA, grouping, panels, behavior untouched; suites green with zero
+logic edits). THE LESSON, recorded verbatim from the live render: the corpus
+stipple field rendered as coarse, blocky dither noise resembling a
+compression artifact spread across the entire page; display type barely
+changed size; and chrome removal deleted structure without adding light or
+depth, leaving lists floating unanchored in noise. Blind generative texture
+shipped without live tuning dials is a gamble against taste; generative
+aesthetics need a tuning surface from the first commit. The stipple, grain,
+and mirrored-field systems are DELETED (not flagged off).
+New direction (World Labs register): the corpus graph IS the environment.
+ONE full-viewport canvas and one scene graph serve both tabs:
+EnvironmentField mounts WebGraph3D at page level with mode "focus" on
+Discovery (the existing portal interaction, full clarity) and "ambient" on
+Research (dimmed and blurred behind everything via a CSS ambient veil,
+non-interactive, pulses and idle ABC thoughts alive at
+AMBIENT.activityScale 0.4). The focus transition is the veil easing over
+500ms, never a cut or remount. Content floats above as frosted glass
+(backdrop blur 16/22px, 4.5/7 percent white fills, a 1px lit top edge, no
+opaque borders, two elevation levels, semi-opaque dark fallback where
+backdrop-filter is unsupported); empty page regions pass pointer events
+through to the field. Ambient guardrails, all implemented: DPR capped at 1
+(focus restores min(dpr, 2)), pulse density additionally halved, rendering
+paused entirely on hidden tabs, and a frame-budget fallback that freezes
+the ambient field to its cached frame with a 60s CSS drift and a console
+warning when the measured 120-frame average exceeds 8ms.
+Palette: ground #0A0F0C (near-black, faint green cast) with a radial
+falloff; foreground whites #EFF4EF/#D8E0D9/#C2CCC4/#98A69C/#798677 (17.35 /
+~14 / 11.71 / 7.61 / 5.05 on ground); GREEN IS LIGHT: core #37C186 for
+small emissive marks only (8.41 non-text), text tint #8FD9B0 (11.71 ground,
+7.00 worst-case glass), glow as low-alpha fills; warm #D4A86B (8.85/5.29)
+and missing #E19480 (8.05/4.82) sit dimmer than green so signal outranks
+warning. All text pairings pass AA on both the blur and fallback paths. The
+semantic token ROLES kept their names across the flip (paper = ground, ink
+ramp = foreground) so every mapped utility retinted without rewrites; the
+light palette is preserved as COLOR_LIGHT; no theme toggle.
+Type, actually large: display 34 to 40px, hero 43 to 48, title 22 to 24,
+headline 27 to 28; the compact lab name now renders at 40px on the
+environment (was 27); primary tab labels 18px display face (were 11px small
+caps); status bar 15px (was 12); rail small caps 12px (were 11).
+The dev tuning panel (development builds only) is the institutionalized
+lesson: live sliders for ambient dim/blur, panel fill/blur, green glow,
+ground radial, and ambient activity scale, persisted to localStorage and
+printing a copyable token diff for baking keepers into design-tokens.ts.
+Deviations: fullscreen is now a pure cinema view of the field (the glass
+dock lives outside the fullscreened element); the bot is unchanged as a
+character with a token rim light (rimIntensity 1.35) holding his silhouette
+against busy field regions.
+
+### 2026-08-20 Art direction pass: ink and paper, one living green, corpus stipple ground
+Decision: a skin-only pass (information architecture, grouping, panels, and
+behavior unchanged; all suites green with zero logic edits). Every design
+value now lives in apps/web/lib/design-tokens.ts, injected into :root by
+layout.tsx and mapped into Tailwind by globals.css via @theme inline; the
+legacy class aliases (surface/border/accent/text-*) remap onto the new
+palette so the older agent views retint without rewrites. Zero hardcoded hex
+colors and zero hardcoded font sizes remain in components (verified by grep);
+the two three.js scenes keep internal lighting constants (lamp colors, star
+dust, shadow black) while every palette-bearing color (bot body/belly/beak,
+portal background, community palette, bridge, labels) is tokenized.
+Palette: paper #FAF8F3 / paper-alt #F2EFE7; ink ramp #1C1D1A / #34362F /
+#4C4F46 / #63665C / #83867B; ONE living green #2E9968 (signal marks only,
+3.37:1, never text on paper) with #1E6B47 for green text (6.09:1) and
+#E3F0E6 / #9FD4B4 tints; warm #8A6B42 (stale, beak, feet; 4.64:1);
+desaturated red #A44E3E (missing/failed; 5.29:1); portal dark #0F110F. All
+text pairings meet AA at their sizes: ink-900 15.96, ink-700 11.54, ink-600
+7.87, ink-500 5.52 (5.10 on paper-alt), paper-on-portal 17.87. ink-400
+(3.50) is restricted to non-body hints; green mid never carries text on
+paper (the pipeline strip's state words were split from its dots for exactly
+this). Green is signal: the activity dot, active rules, selection rules, the
+bot, findings' arrows; never a background wash.
+Type: Fraunces (display; characterful high-contrast editorial serif, the
+playful-but-editorial register of the references) + Archivo (text; a quiet
+grotesk that does not read as system UI) + IBM Plex Mono, all via next/font.
+MONOSPACE NOW CARRIES MEANING: it marks a number the machine computed
+(scores, row counts, coordinates, ids); prose never sets numbers in mono
+unless the machine produced them. Scale ~1.25 around 14px (11/14/18/22/
+27/34/43 with 10/12/13/15 as dense-UI in-betweens); display tracking
+-0.022em, small caps labels +0.14em in ink-500 (the .caps-label class).
+Ground: the corpus stipple field renders the EXISTING t-SNE coordinates (the
+two highest-variance axes of the stored 3D layout; no projection is ever
+recomputed for decoration) into a density buffer, thresholded per-cell by a
+deterministic hash into ink stipple, used as a fixed page background at 0.07
+opacity, cached per web run (render cost logged to the console by
+corpus-ground; measured in-browser, analytically ~1.2M blob ops + 256k
+stipple pixels, tens of milliseconds, once per run). A generated grain tile
+overlays everything at 0.05 to kill the flat-vector feel. Empty states, the
+empty portal, and the disabled Fabrication panel use a MIRRORED, higher-
+contrast version of the same field (inverted on the dark portal) with
+display type over it. Scroll parallax was skipped: the shells fix their
+height and the page does not scroll, so there is no scroll to drive it.
+Chrome: bordered rounded-rect cards are gone as the default container in the
+shell, Discoveries, Diagnostics, Libraries, and the pipeline strip; findings
+and rows are hairline-separated entries, selection is a green left rule, the
+status bar is a line of type over a hairline, rail tabs are tracked small
+caps with a green active rule, the portal bleeds borderless into its region,
+and the pipeline strip became a typographic progression with state dots and
+hairline connectors. The older agent views (Scribe/Critic/Experimentalist/
+Writer/Scheduler internals) retint through the alias layer and keep their
+card markup until their planned panel-by-panel migration. Radius survives
+only on controls and the bot's bubble. Motion: 320ms panel / 260ms
+disclosure cubic transitions; the activity dot breathes with ACTIVITY_LEVEL,
+never blinks. The bot keeps all behavior; its body is the living green,
+belly paper, beak/feet warm, with a whisper of light halo so it reads on the
+dark portal as well as on paper. The legacy PointField background was
+replaced by the corpus ground. Note: a file-sync tool keeps duplicating
+.next build artifacts with " N"-suffixed names, which shadowed Next's type
+declarations; tsconfig now excludes ".next/**/* [2-5].ts" and the repo
+should ideally live outside iCloud-synced Documents.
+
 ### 2026-08-20 Addendum: one shared shell for both tabs, bot voice, walking presence
 Decision: the shell was extracted into shared components used by BOTH tabs
 (one implementation, two configurations): components/shell/app-shell.tsx

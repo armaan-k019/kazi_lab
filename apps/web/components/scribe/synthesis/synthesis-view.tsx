@@ -85,7 +85,7 @@ export function SynthesisView({
     <button
       type="button"
       onClick={onBack}
-      className="mb-6 text-[13px] text-text-secondary transition-colors hover:text-accent"
+      className="mb-6 text-ui text-text-secondary transition-colors hover:text-accent"
     >
       ← Corpus
     </button>
@@ -97,7 +97,7 @@ export function SynthesisView({
     return (
       <div>
         {back}
-        <p className="max-w-md text-[15px] leading-relaxed text-text-muted">
+        <p className="max-w-md text-mid leading-relaxed text-text-muted">
           The general library is an all-papers view and is not synthesized.
           Switch to a research library to see its synthesis.
         </p>
@@ -117,7 +117,7 @@ export function SynthesisView({
     return (
       <div>
         {back}
-        <p className="text-[13px] text-text-muted">Loading synthesis…</p>
+        <p className="text-ui text-text-muted">Loading synthesis…</p>
       </div>
     );
   }
@@ -129,7 +129,7 @@ export function SynthesisView({
           <h2 className="text-lg font-medium text-text-secondary">
             No synthesis yet for {libraryName}.
           </h2>
-          <p className="max-w-md text-[15px] leading-relaxed text-text-muted">
+          <p className="max-w-md text-mid leading-relaxed text-text-muted">
             Run synthesis from the corpus view to see the connections across this
             library&rsquo;s papers.
           </p>
@@ -161,7 +161,7 @@ export function SynthesisView({
       <h2 className="text-2xl font-semibold tracking-tight text-text-primary">
         Synthesis · {libraryName}
       </h2>
-      <p className="mt-2 text-[13px] text-text-muted">
+      <p className="mt-2 text-ui text-text-muted">
         {run.paperCount ?? papers.length} papers · synthesized{" "}
         {formatRelativeTime(run.completedAt)} · {run.counts.themeCount} themes,{" "}
         {run.counts.findingCount} findings, {run.counts.relationCount}{" "}
@@ -169,10 +169,10 @@ export function SynthesisView({
       </p>
 
       {/* Consensus summary */}
-      <p className="mt-3 text-[13px] text-text-secondary">
+      <p className="mt-3 text-ui text-text-secondary">
         <span className="text-accent">{consensusCounts.consensus} consensus</span>
         {" · "}
-        <span className="text-[#b4493b]">
+        <span className="text-missing">
           {consensusCounts.contested} contested
         </span>
         {" · "}
@@ -180,7 +180,7 @@ export function SynthesisView({
           {consensusCounts.single} single-source
         </span>
         {" · "}
-        <span className="text-[#b4493b]">
+        <span className="text-missing">
           {contradictionCount}{" "}
           {contradictionCount === 1 ? "contradiction" : "contradictions"}
         </span>
@@ -188,7 +188,7 @@ export function SynthesisView({
 
       {/* Graph */}
       <section className="mt-6 rounded-xl border border-border bg-surface p-2">
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-3 pt-2 text-[12px] text-text-muted">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-3 pt-2 text-small text-text-muted">
           <LegendDot color={RELATION_COLOR.supports} label="supports" />
           <LegendDot color={RELATION_COLOR.contradicts} label="contradicts" />
           <LegendDot color={RELATION_COLOR.extends} label="extends" />
@@ -204,7 +204,7 @@ export function SynthesisView({
           </span>
         </div>
         {edges.length === 0 && (
-          <p className="px-3 py-2 text-[12px] text-text-muted">
+          <p className="px-3 py-2 text-small text-text-muted">
             No cross-paper connections were found in this run.
           </p>
         )}
@@ -239,12 +239,12 @@ export function SynthesisView({
               return (
                 <>
                   {narration && (
-                    <p className="mt-2 text-[15px] leading-[1.65] text-text-primary">
+                    <p className="mt-2 text-mid leading-[1.65] text-text-primary">
                       {narration}
                     </p>
                   )}
                   {rels.length === 0 ? (
-                    <p className="mt-3 text-[13px] text-text-muted">
+                    <p className="mt-3 text-ui text-text-muted">
                       {narration
                         ? "No cross-paper claim relations in this run."
                         : "This paper has no cross-paper claim relations in this run."}
@@ -252,7 +252,7 @@ export function SynthesisView({
                   ) : (
                     <>
                       {narration && (
-                        <p className="mt-4 text-[12px] font-medium text-text-muted">
+                        <p className="mt-4 text-small font-medium text-text-muted">
                           Relations
                         </p>
                       )}
@@ -288,10 +288,10 @@ export function SynthesisView({
               );
               return (
                 <div className="mt-2">
-                  <p className="text-[14px] text-text-primary">
+                  <p className="text-body text-text-primary">
                     “{info?.text ?? "claim"}”
                   </p>
-                  <p className="mt-1 text-[12px] text-text-muted">
+                  <p className="mt-1 text-small text-text-muted">
                     {paperTitle.get(info?.paperId ?? "") ?? ""}
                   </p>
                   {rels.length > 0 && (
@@ -325,11 +325,11 @@ export function SynthesisView({
               if (!q) return null;
               return (
                 <div className="mt-2">
-                  <p className="text-[15px] font-medium text-text-primary">
+                  <p className="text-mid font-medium text-text-primary">
                     {q.question}
                   </p>
                   {q.rationale && (
-                    <p className="mt-2 text-[14px] leading-relaxed text-text-muted">
+                    <p className="mt-2 text-body leading-relaxed text-text-muted">
                       {q.rationale}
                     </p>
                   )}
@@ -409,7 +409,7 @@ export function SynthesisView({
 
 function PanelLabel({ children }: { children: React.ReactNode }) {
   return (
-    <h3 className="text-[13px] font-medium text-text-secondary">{children}</h3>
+    <h3 className="text-ui font-medium text-text-secondary">{children}</h3>
   );
 }
 
@@ -422,11 +422,11 @@ function DetailHeader({
 }) {
   return (
     <div className="flex items-start justify-between gap-3">
-      <h3 className="text-[15px] font-medium text-text-primary">{children}</h3>
+      <h3 className="text-mid font-medium text-text-primary">{children}</h3>
       <button
         type="button"
         onClick={onClose}
-        className="shrink-0 text-[12px] text-text-muted transition-colors hover:text-text-primary"
+        className="shrink-0 text-small text-text-muted transition-colors hover:text-text-primary"
       >
         close
       </button>
@@ -451,7 +451,7 @@ function RelationItem({
 }) {
   const color = relationColor(type);
   return (
-    <li className="border-l-2 pl-3 text-[13px]" style={{ borderColor: color }}>
+    <li className="border-l-2 pl-3 text-ui" style={{ borderColor: color }}>
       <span className="font-medium" style={{ color }}>
         {type}
       </span>{" "}
@@ -490,7 +490,7 @@ function PaperChip({
     <button
       type="button"
       onClick={() => onChip(id)}
-      className="rounded-full bg-surface-raised px-2.5 py-1 text-[12px] text-text-secondary transition-colors hover:text-accent"
+      className="rounded-full bg-surface-raised px-2.5 py-1 text-small text-text-secondary transition-colors hover:text-accent"
     >
       {paperTitle.get(id) ?? "paper"}
     </button>
@@ -502,7 +502,7 @@ function ConsensusBadge({ value }: { value: string | null }) {
     consensus: { label: "consensus", cls: "bg-accent-dim text-accent" },
     contested: {
       label: "contested",
-      cls: "bg-[#b4493b]/10 text-[#b4493b]",
+      cls: "bg-missing/10 text-missing",
     },
     "single-source": {
       label: "single-source",
@@ -513,7 +513,7 @@ function ConsensusBadge({ value }: { value: string | null }) {
   if (!m) return null;
   return (
     <span
-      className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${m.cls}`}
+      className={`rounded-full px-2 py-0.5 text-caption font-medium ${m.cls}`}
     >
       {m.label}
     </span>
@@ -533,13 +533,13 @@ function FindingCard({
   return (
     <div className="rounded-xl border border-border bg-surface p-4">
       <div className="flex items-start justify-between gap-3">
-        <p className="text-[15px] font-medium leading-snug text-text-primary">
+        <p className="text-mid font-medium leading-snug text-text-primary">
           {finding.statement}
         </p>
         <ConsensusBadge value={finding.consensus} />
       </div>
       {finding.detail && (
-        <p className="mt-2 text-[14px] leading-relaxed text-text-secondary">
+        <p className="mt-2 text-body leading-relaxed text-text-secondary">
           {finding.detail}
         </p>
       )}
@@ -596,11 +596,11 @@ function OpenQuestionCard({
 
   return (
     <div className="rounded-xl border border-border bg-surface p-4">
-      <p className="text-[15px] font-medium leading-snug text-text-primary">
+      <p className="text-mid font-medium leading-snug text-text-primary">
         {question.question}
       </p>
       {question.rationale && (
-        <p className="mt-2 text-[14px] leading-relaxed text-text-muted">
+        <p className="mt-2 text-body leading-relaxed text-text-muted">
           {question.rationale}
         </p>
       )}
@@ -620,7 +620,7 @@ function OpenQuestionCard({
       <button
         type="button"
         onClick={search}
-        className="mt-3 text-[12px] font-medium text-accent transition-opacity hover:opacity-80"
+        className="mt-3 text-small font-medium text-accent transition-opacity hover:opacity-80"
       >
         {open ? "hide recent work ▾" : "find recent work on this →"}
       </button>
@@ -628,18 +628,18 @@ function OpenQuestionCard({
       {open && (
         <div className="mt-3 border-t border-border pt-3">
           {loading && (
-            <p className="flex items-center gap-2 text-[12px] text-text-secondary">
+            <p className="flex items-center gap-2 text-small text-text-secondary">
               <Spinner /> searching recent literature…
             </p>
           )}
-          {error && <p className="text-[12px] text-[#b4493b]">{error}</p>}
+          {error && <p className="text-small text-missing">{error}</p>}
           {result && (
             <>
-              <p className="text-[12px] text-text-muted">
+              <p className="text-small text-text-muted">
                 searched: <span className="text-text-secondary">{result.searchQuery}</span>
               </p>
               {result.candidates.length === 0 ? (
-                <p className="mt-2 text-[12px] text-text-muted">
+                <p className="mt-2 text-small text-text-muted">
                   No recent work found beyond this library.
                 </p>
               ) : (
@@ -673,9 +673,9 @@ function ThemeItem({
 }) {
   return (
     <div className="rounded-lg border border-border bg-surface px-4 py-3">
-      <p className="text-[14px] font-medium text-text-primary">{theme.name}</p>
+      <p className="text-body font-medium text-text-primary">{theme.name}</p>
       {theme.description && (
-        <p className="mt-1 text-[13px] leading-relaxed text-text-secondary">
+        <p className="mt-1 text-ui leading-relaxed text-text-secondary">
           {theme.description}
         </p>
       )}

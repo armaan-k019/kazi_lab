@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { THEME_RAMP } from "@/lib/design-tokens";
 import {
   forceCollide,
   forceLink,
@@ -79,23 +80,9 @@ const SHOW_QUESTIONS_DEFAULT = true;
 const SIZE_MIN = 8;
 const SIZE_MAX = 21;
 
-// Theme color palette: a contained, deliberately MUTED and WARM categorical set
-// (theme coloring needs multiple hues; these are desaturated and calm to fit
-// the aesthetic, not bright/neon). Beyond the existing green/red/gray tokens.
-const THEME_PALETTE = [
-  "#b07a4f", // ochre
-  "#6f8f6a", // sage
-  "#a36a5b", // clay rose
-  "#5f7f86", // dusty teal
-  "#9c8a4e", // moss gold
-  "#86697e", // muted plum
-  "#7e8b5a", // olive
-  "#b08968", // tan
-  "#6b7f9c", // dusty blue
-  "#9a6b66", // brick mauve
-  "#5f8f7d", // muted green
-  "#8a7a6b", // warm taupe
-];
+// Theme color palette: the categorical THEME_RAMP from the design tokens
+// (data encoding needs multiple hues; the ramp is muted to sit in the system).
+const THEME_PALETTE = [...THEME_RAMP];
 const UNTHEMED_COLOR = "var(--text-muted)";
 
 type YMode = "theme" | "influence" | "centrality" | "semantic";
@@ -549,12 +536,12 @@ export function TimelineGraph({
           : null;
 
   const controlBtn =
-    "rounded px-2 py-0.5 text-[11px] transition-colors";
+    "rounded px-2 py-0.5 text-caption transition-colors";
 
   return (
     <div className="relative">
       {/* Y-mode segmented control (top center) */}
-      <div className="absolute left-1/2 top-2 z-10 flex -translate-x-1/2 items-center gap-1 rounded-md border border-border bg-surface px-1.5 py-1 text-[11px]">
+      <div className="absolute left-1/2 top-2 z-10 flex -translate-x-1/2 items-center gap-1 rounded-md border border-border bg-surface px-1.5 py-1 text-caption">
         <span className="px-1 text-text-muted">Y</span>
         {Y_MODES.map((m) => (
           <button
@@ -575,14 +562,14 @@ export function TimelineGraph({
       <button
         type="button"
         onClick={() => setShowQuestions((v) => !v)}
-        className="absolute left-2 top-2 z-10 rounded-md border border-border bg-surface px-2.5 py-1 text-[12px] text-text-secondary transition-colors hover:border-accent/40 hover:text-accent"
+        className="absolute left-2 top-2 z-10 rounded-md border border-border bg-surface px-2.5 py-1 text-small text-text-secondary transition-colors hover:border-accent/40 hover:text-accent"
       >
         {showQuestions ? "open questions: on" : "open questions: off"}
       </button>
       <button
         type="button"
         onClick={resetView}
-        className="absolute right-2 top-2 z-10 rounded-md border border-border bg-surface px-2.5 py-1 text-[12px] text-text-secondary transition-colors hover:border-accent/40 hover:text-accent"
+        className="absolute right-2 top-2 z-10 rounded-md border border-border bg-surface px-2.5 py-1 text-small text-text-secondary transition-colors hover:border-accent/40 hover:text-accent"
       >
         reset view
       </button>
@@ -592,7 +579,7 @@ export function TimelineGraph({
         <button
           type="button"
           onClick={() => setShowThemeLegend((v) => !v)}
-          className="rounded-md border border-border bg-surface px-2.5 py-1 text-[12px] text-text-secondary transition-colors hover:border-accent/40 hover:text-accent"
+          className="rounded-md border border-border bg-surface px-2.5 py-1 text-small text-text-secondary transition-colors hover:border-accent/40 hover:text-accent"
         >
           themes ({axes.legend.length}) {showThemeLegend ? "▾" : "▸"}
         </button>
@@ -605,7 +592,7 @@ export function TimelineGraph({
                   style={{ backgroundColor: t.color }}
                   aria-hidden
                 />
-                <span className="text-[11px] text-text-secondary">
+                <span className="text-caption text-text-secondary">
                   {truncate(t.name, 34)}
                 </span>
               </div>

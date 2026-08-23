@@ -10,7 +10,7 @@ import type {
 import { formatRelativeTime } from "@/lib/format";
 
 const ACCENT = "var(--accent)";
-const CANDIDATE = "#b07a4f"; // warm amber: needs pressure-testing, not asserted
+const CANDIDATE = "var(--warm)"; // warm amber: needs pressure-testing, not asserted
 
 const LEVELS: { key: CrossDomainLevel; label: string; blurb: string }[] = [
   {
@@ -105,7 +105,7 @@ export function CrossDomainView() {
       <h2 className="text-2xl font-semibold tracking-tight text-text-primary">
         Cross-Domain
       </h2>
-      <p className="mt-1.5 max-w-2xl text-[13px] leading-relaxed text-text-muted">
+      <p className="mt-1.5 max-w-2xl text-ui leading-relaxed text-text-muted">
         A lab-level read across projects: what genuinely recurs from one domain to
         another, grounded in the methods and audited findings underneath. Method
         and claim recurrences are asserted only with concrete cross-library
@@ -113,10 +113,10 @@ export function CrossDomainView() {
         Critic to pressure-test. The lab thesis is a hypothesis here, not a lens.
       </p>
 
-      {error && <p className="mt-4 text-[13px] text-[#b4493b]">{error}</p>}
+      {error && <p className="mt-4 text-ui text-missing">{error}</p>}
 
       {data && !canRun && (
-        <p className="mt-8 max-w-md text-[15px] leading-relaxed text-text-muted">
+        <p className="mt-8 max-w-md text-mid leading-relaxed text-text-muted">
           Cross-domain synthesis reads across at least two synthesized projects.
           {eligibleCount === 0
             ? " No projects are synthesized yet."
@@ -134,7 +134,7 @@ export function CrossDomainView() {
               type="button"
               onClick={run}
               disabled={running || critiquing}
-              className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:cursor-default disabled:opacity-50"
+              className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-paper transition-opacity hover:opacity-90 disabled:cursor-default disabled:opacity-50"
             >
               {data.run ? "Re-run cross-domain synthesis" : "Run cross-domain synthesis"}
             </button>
@@ -149,17 +149,17 @@ export function CrossDomainView() {
               </button>
             )}
             {running && (
-              <span className="flex items-center gap-2 text-[13px] text-text-secondary">
+              <span className="flex items-center gap-2 text-ui text-text-secondary">
                 <Spinner /> reasoning across {eligibleCount} projects, this takes a minute…
               </span>
             )}
             {critiquing && (
-              <span className="flex items-center gap-2 text-[13px] text-text-secondary">
+              <span className="flex items-center gap-2 text-ui text-text-secondary">
                 <Spinner /> the skeptic is attacking each link and scanning for missed ones…
               </span>
             )}
             {!running && !critiquing && data.run && (
-              <span className="text-[13px] text-text-muted">
+              <span className="text-ui text-text-muted">
                 Last synthesis {formatRelativeTime(data.run.completedAt)} · over{" "}
                 {data.run.scope.join(", ")}
                 {data.critique &&
@@ -168,14 +168,14 @@ export function CrossDomainView() {
             )}
           </div>
 
-          <p className="mt-3 text-[12px] text-text-muted">
+          <p className="mt-3 text-small text-text-muted">
             Eligible projects:{" "}
             {data.eligible.map((e) => e.name).join(", ")} (general excluded;
             unsynthesized projects skipped)
           </p>
 
           {!data.run && !running && (
-            <p className="mt-3 text-[13px] text-text-muted">
+            <p className="mt-3 text-ui text-text-muted">
               Not yet run. Run a cross-domain synthesis to surface grounded
               recurrences across these projects.
             </p>
@@ -183,10 +183,10 @@ export function CrossDomainView() {
 
           {data.run?.notes && (
             <section className="mt-6 rounded-xl border border-border bg-surface p-5">
-              <p className="text-[11px] font-medium uppercase tracking-wide text-text-secondary">
+              <p className="text-caption font-medium uppercase tracking-wide text-text-secondary">
                 Honest read
               </p>
-              <p className="mt-2 text-[14px] leading-relaxed text-text-primary">
+              <p className="mt-2 text-body leading-relaxed text-text-primary">
                 {data.run.notes}
               </p>
             </section>
@@ -198,13 +198,13 @@ export function CrossDomainView() {
               return (
                 <section key={key} className="mt-10">
                   <div className="flex items-baseline justify-between gap-3">
-                    <h3 className="text-[13px] font-medium text-text-secondary">
+                    <h3 className="text-ui font-medium text-text-secondary">
                       {label} ({links.length})
                     </h3>
                   </div>
-                  <p className="mt-1 text-[12px] text-text-muted">{blurb}</p>
+                  <p className="mt-1 text-small text-text-muted">{blurb}</p>
                   {links.length === 0 ? (
-                    <p className="mt-3 text-[13px] text-text-muted">
+                    <p className="mt-3 text-ui text-text-muted">
                       None at this level{key === "method" ? " (no shared methods grounded across projects)" : ""}.
                     </p>
                   ) : (
@@ -223,7 +223,7 @@ export function CrossDomainView() {
   );
 }
 
-const FLAG = "#b4493b"; // struck / rejected
+const FLAG = "var(--missing)"; // struck / rejected
 // Verdict presentation: confirmed/promoted read calm positive, demoted amber,
 // rejected clearly struck. null = not yet critiqued.
 function verdictStyle(v: string): { color: string; label: string } {
@@ -237,22 +237,22 @@ function LinkCard({ link }: { link: CrossDomainLink }) {
   const rejected = link.verdict?.verdict === "rejected";
   const accent = link.isCandidate ? CANDIDATE : ACCENT;
   const borderColor = rejected
-    ? "color-mix(in srgb, #b4493b 35%, transparent)"
+    ? "color-mix(in srgb, var(--missing) 35%, transparent)"
     : link.isCandidate
-      ? "color-mix(in srgb, #b07a4f 35%, transparent)"
+      ? "color-mix(in srgb, var(--warm) 35%, transparent)"
       : "var(--border)";
   return (
     <div className="rounded-xl border bg-surface p-4" style={{ borderColor }}>
       <div className="flex flex-wrap items-center gap-2">
         <span
-          className="rounded-full px-2 py-0.5 text-[11px] font-medium"
+          className="rounded-full px-2 py-0.5 text-caption font-medium"
           style={{ color: accent, backgroundColor: "var(--surface-raised)" }}
         >
           {link.isCandidate ? "candidate · needs pressure-testing" : "grounded"}
         </span>
         {link.source === "discovery" && (
           <span
-            className="rounded-full px-2 py-0.5 text-[11px] font-medium"
+            className="rounded-full px-2 py-0.5 text-caption font-medium"
             style={{ color: CANDIDATE, backgroundColor: "var(--surface-raised)" }}
           >
             discovered · needs validation
@@ -260,7 +260,7 @@ function LinkCard({ link }: { link: CrossDomainLink }) {
         )}
         {link.verdict && (
           <span
-            className="rounded-full px-2 py-0.5 text-[11px] font-semibold"
+            className="rounded-full px-2 py-0.5 text-caption font-semibold"
             style={{
               color: verdictStyle(link.verdict.verdict).color,
               backgroundColor: "var(--surface-raised)",
@@ -271,13 +271,13 @@ function LinkCard({ link }: { link: CrossDomainLink }) {
           </span>
         )}
         {link.confidence && (
-          <span className="text-[12px] text-text-muted">{link.confidence} confidence</span>
+          <span className="text-small text-text-muted">{link.confidence} confidence</span>
         )}
         <span className="flex flex-wrap items-center gap-1">
           {link.libraries.map((lib) => (
             <span
               key={lib.id}
-              className="rounded-full border border-border px-2 py-0.5 text-[11px] text-text-secondary"
+              className="rounded-full border border-border px-2 py-0.5 text-caption text-text-secondary"
             >
               {lib.name}
             </span>
@@ -286,7 +286,7 @@ function LinkCard({ link }: { link: CrossDomainLink }) {
       </div>
 
       <p
-        className="mt-3 text-[14px] font-medium leading-snug"
+        className="mt-3 text-body font-medium leading-snug"
         style={{
           color: rejected ? "var(--text-muted)" : "var(--text-primary)",
           textDecoration: rejected ? "line-through" : "none",
@@ -295,7 +295,7 @@ function LinkCard({ link }: { link: CrossDomainLink }) {
         {link.summary}
       </p>
       {link.rationale && (
-        <p className="mt-1.5 text-[13px] leading-relaxed text-text-secondary">
+        <p className="mt-1.5 text-ui leading-relaxed text-text-secondary">
           {link.rationale}
         </p>
       )}
@@ -304,10 +304,10 @@ function LinkCard({ link }: { link: CrossDomainLink }) {
           className="mt-2.5 rounded-lg border-l-2 pl-3 py-1"
           style={{ borderColor: verdictStyle(link.verdict.verdict).color }}
         >
-          <p className="text-[11px] font-medium uppercase tracking-wide text-text-muted">
+          <p className="text-caption font-medium uppercase tracking-wide text-text-muted">
             Skeptic&rsquo;s verdict
           </p>
-          <p className="mt-1 text-[13px] leading-relaxed text-text-primary">
+          <p className="mt-1 text-ui leading-relaxed text-text-primary">
             {link.verdict.rationale}
           </p>
         </div>
@@ -315,13 +315,13 @@ function LinkCard({ link }: { link: CrossDomainLink }) {
 
       {link.evidence.length > 0 && (
         <div className="mt-3 border-t border-border pt-3">
-          <p className="text-[11px] font-medium uppercase tracking-wide text-text-muted">
+          <p className="text-caption font-medium uppercase tracking-wide text-text-muted">
             Evidence
           </p>
           <ul className="mt-1.5 space-y-1.5">
             {link.evidence.map((e) => (
-              <li key={e.id} className="text-[12px] leading-relaxed text-text-secondary">
-                <span className="rounded border border-border px-1.5 py-0.5 text-[11px] text-text-muted">
+              <li key={e.id} className="text-small leading-relaxed text-text-secondary">
+                <span className="rounded border border-border px-1.5 py-0.5 text-caption text-text-muted">
                   {e.libraryName}
                 </span>{" "}
                 <span className="text-text-muted">{e.kind}:</span>{" "}

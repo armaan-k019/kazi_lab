@@ -1,72 +1,211 @@
 @import "tailwindcss";
 
 /*
-  kazi-lab design tokens. Warm light reading environment: near-white background,
-  warm-gray surfaces and hairlines, one calm deep-green accent used sparingly.
-  Depth comes from soft borders, not heavy shadows.
+  Art direction: a dark spatial environment. The corpus field is the ambient
+  ground; content floats above it as frosted glass; ONE green behaves as
+  light. Values live in ONE place, apps/web/lib/design-tokens.ts, injected
+  into :root by app/layout.tsx; this file maps them into Tailwind and sets
+  base styles. Semantic roles: "paper" = the ground (near-black), the "ink"
+  ramp = the foreground whites. No literal colors or sizes here.
 */
-:root {
-  --background: #fcfcfb;
-  --surface: #ffffff;
-  --surface-raised: #f6f5f1;
-  --border: #e8e6e0;
-  --border-strong: #dad7cf;
-  --text-primary: #1f1e1c;
-  --text-secondary: #6b6b66;
-  --text-muted: #9a9a93;
-  --accent: #2f7d5b;
-  --accent-dim: rgba(47, 125, 91, 0.1);
-  --accent-rgb: 47, 125, 91;
-}
 
 @theme inline {
-  --color-background: var(--background);
-  --color-surface: var(--surface);
-  --color-surface-raised: var(--surface-raised);
-  --color-border: var(--border);
-  --color-border-strong: var(--border-strong);
-  --color-text-primary: var(--text-primary);
-  --color-text-secondary: var(--text-secondary);
-  --color-text-muted: var(--text-muted);
-  --color-accent: var(--accent);
-  --color-accent-dim: var(--accent-dim);
+  /* Ink / paper / green (the palette). */
+  --color-paper: var(--paper);
+  --color-paper-alt: var(--paper-alt);
+  --color-ink: var(--ink-900);
+  --color-ink-700: var(--ink-700);
+  --color-ink-600: var(--ink-600);
+  --color-ink-500: var(--ink-500);
+  --color-ink-400: var(--ink-400);
+  --color-hairline: var(--hairline);
+  --color-hairline-strong: var(--hairline-strong);
+  --color-green: var(--green);
+  --color-green-deep: var(--green-deep);
+  --color-green-tint: var(--green-tint);
+  --color-green-tint-dark: var(--green-tint-dark);
+  --color-warm: var(--warm);
+  --color-missing: var(--missing);
+  --color-portal: var(--portal-bg);
 
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  /* Legacy aliases: the older views keep their class names and retint. The
+     surface alias maps to paper so bordered cards dissolve into the ground;
+     borders become hairlines. */
+  --color-background: var(--paper);
+  --color-surface: var(--paper);
+  --color-surface-raised: var(--paper-alt);
+  --color-border: var(--hairline);
+  --color-border-strong: var(--hairline-strong);
+  --color-text-primary: var(--ink-900);
+  --color-text-secondary: var(--ink-600);
+  --color-text-muted: var(--ink-500);
+  --color-accent: var(--green-deep);
+  --color-accent-dim: var(--green-tint);
+
+  /* Type scale (utilities text-micro .. text-hero). */
+  --text-micro: var(--type-micro);
+  --text-caption: var(--type-caption);
+  --text-small: var(--type-small);
+  --text-ui: var(--type-ui);
+  --text-body: var(--type-body);
+  --text-mid: var(--type-mid);
+  --text-lead: var(--type-lead);
+  --text-title: var(--type-title);
+  --text-headline: var(--type-headline);
+  --text-display: var(--type-display);
+  --text-hero: var(--type-hero);
+
+  /* Faces: display (editorial serif), text (quiet grotesk), mono (computed
+     values only; monospace marks a machine number). */
+  --font-display: var(--font-nunito), system-ui, sans-serif;
+  --font-sans: var(--font-nunito), system-ui, sans-serif;
+  --font-mono: var(--font-plex-mono), ui-monospace, monospace;
+
+  --radius-control: var(--radius-control);
+  --radius-bubble: var(--radius-bubble);
 }
 
 html {
-  background: var(--background);
-  color-scheme: light;
+  background: var(--paper);
+  color-scheme: dark;
 }
 
 body {
-  background: var(--background);
-  color: var(--text-primary);
-  font-family: var(--font-sans), system-ui, sans-serif;
+  /* The ground: near-black with a faint radial falloff (lighter center,
+     darker corners) so the page has depth instead of flatness. Strength is
+     the --ground-radial token; the dev panel tunes it live. */
+  background:
+    radial-gradient(
+      ellipse 120% 90% at 50% 30%,
+      transparent 40%,
+      rgb(0 0 0 / calc(0.5 * var(--ground-radial))) 100%
+    ),
+    var(--paper);
+  background-attachment: fixed;
+  color: var(--ink-900);
+  font-family: var(--font-nunito), system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  letter-spacing: -0.006em;
+  letter-spacing: var(--track-body);
+}
+
+/* GLASS: frosted panels floating over the environment. Two elevation levels;
+   a lit 1px top edge instead of borders; a semi-opaque dark fill where
+   backdrop-filter is unsupported (contrast verified on both paths). */
+.glass,
+.glass-raised {
+  position: relative;
+  background: var(--glass-fill);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  border-radius: var(--radius-glass);
+}
+.glass-raised {
+  background: var(--glass-fill-raised);
+  backdrop-filter: blur(var(--glass-blur-raised));
+  -webkit-backdrop-filter: blur(var(--glass-blur-raised));
+}
+.glass::before,
+.glass-raised::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 1px;
+  background: var(--glass-edge);
+  border-radius: var(--radius-glass) var(--radius-glass) 0 0;
+  pointer-events: none;
+}
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .glass,
+  .glass-raised {
+    background: var(--glass-fallback);
+  }
+}
+
+/* THE AMBIENT VEIL: sits over the one field canvas; in focus it clears.
+   The transition IS the focus-mode feel: 500ms ease, never a cut. */
+.ambient-veil {
+  background: rgb(10 15 12 / var(--ambient-dim));
+  backdrop-filter: blur(var(--ambient-blur));
+  -webkit-backdrop-filter: blur(var(--ambient-blur));
+  transition:
+    background var(--focus-ms) var(--motion-ease),
+    backdrop-filter var(--focus-ms) var(--motion-ease),
+    -webkit-backdrop-filter var(--focus-ms) var(--motion-ease);
+}
+.ambient-veil.focused {
+  background: rgb(10 15 12 / 0);
+  backdrop-filter: blur(0px);
+  -webkit-backdrop-filter: blur(0px);
+}
+@media (prefers-reduced-motion: reduce) {
+  .ambient-veil {
+    transition: none;
+  }
+}
+
+/* The frozen field's imperceptible drift (frame-budget fallback). */
+@keyframes field-drift {
+  from {
+    transform: scale(1);
+  }
+  to {
+    transform: scale(1.02);
+  }
+}
+.field-frozen {
+  animation: field-drift 60s ease-in-out infinite alternate;
+}
+@media (prefers-reduced-motion: reduce) {
+  .field-frozen {
+    animation: none;
+  }
+}
+
+/* Display register: the friendly sans goes heavy and gently tight at
+   display sizes. */
+.font-display {
+  letter-spacing: var(--track-display);
+  font-weight: 800;
+}
+
+/* Small caps section labels: the editorial register of the references.
+   Tracked wide, ink-500, always uppercase. */
+.caps-label {
+  font-size: var(--type-caption);
+  letter-spacing: var(--track-caps);
+  text-transform: uppercase;
+  color: var(--ink-500);
+  font-weight: 500;
+}
+
+/* Rail-size small caps (the panel tabs). */
+.caps-label-lg {
+  font-size: var(--type-small);
+  letter-spacing: var(--track-caps);
+  text-transform: uppercase;
+  color: var(--ink-500);
+  font-weight: 500;
 }
 
 ::selection {
-  background: var(--accent-dim);
-  color: var(--text-primary);
+  background: var(--green-tint);
+  color: var(--ink-900);
 }
 
-/* Thin, quiet scrollbars that match the surface palette. */
+/* Thin, quiet scrollbars on paper. */
 * {
   scrollbar-width: thin;
-  scrollbar-color: var(--border-strong) transparent;
+  scrollbar-color: var(--hairline-strong) transparent;
 }
 *::-webkit-scrollbar {
   width: 9px;
   height: 9px;
 }
 *::-webkit-scrollbar-thumb {
-  background: var(--border-strong);
+  background: var(--hairline-strong);
   border-radius: 999px;
-  border: 2px solid var(--background);
+  border: 2px solid var(--paper);
 }
 *::-webkit-scrollbar-track {
   background: transparent;

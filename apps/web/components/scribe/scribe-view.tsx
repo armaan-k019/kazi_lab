@@ -384,14 +384,14 @@ export function ScribeView() {
               <button
                 type="button"
                 onClick={() => setViewingChat(true)}
-                className="text-[13px] text-accent transition-opacity hover:opacity-80"
+                className="text-ui text-accent transition-opacity hover:opacity-80"
               >
                 ask this library →
               </button>
               <button
                 type="button"
                 onClick={() => setViewingGaps(true)}
-                className="text-[13px] text-accent transition-opacity hover:opacity-80"
+                className="text-ui text-accent transition-opacity hover:opacity-80"
               >
                 what am I missing →
               </button>
@@ -413,19 +413,19 @@ export function ScribeView() {
               <button
                 type="submit"
                 disabled={working || parsedCount === 0}
-                className="rounded-lg bg-accent px-5 py-2.5 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:cursor-default disabled:opacity-40"
+                className="rounded-lg bg-accent px-5 py-2.5 text-sm font-medium text-paper transition-opacity hover:opacity-90 disabled:cursor-default disabled:opacity-40"
               >
                 {parsedCount > 1 ? `Ingest ${parsedCount}` : "Ingest"}
               </button>
             </div>
 
-            <p className="text-[12px] text-text-muted">
+            <p className="text-small text-text-muted">
               One URL per line for batch.
             </p>
 
             {/* Single-ingest status line (hidden while a batch is shown) */}
             {!batch && (
-              <div className="flex h-5 items-center gap-2 text-[13px]">
+              <div className="flex h-5 items-center gap-2 text-ui">
                 {working && (
                   <span className="flex items-center gap-2 text-text-secondary">
                     <Spinner />
@@ -463,7 +463,7 @@ export function ScribeView() {
         {loadError && <p className="text-sm text-text-secondary">{loadError}</p>}
 
         {!papers && !loadError && (
-          <p className="text-[13px] text-text-muted">Loading…</p>
+          <p className="text-ui text-text-muted">Loading…</p>
         )}
 
         {papers && papers.length === 0 && (
@@ -475,7 +475,7 @@ export function ScribeView() {
         )}
 
         {papers && papers.length > 0 && (
-          <p className="mb-4 text-[13px] text-text-muted">
+          <p className="mb-4 text-ui text-text-muted">
             <span className="font-medium text-accent">{papers.length}</span>{" "}
             {papers.length === 1 ? "paper" : "papers"} in {activeName}
           </p>
@@ -549,17 +549,17 @@ function PaperRow({
 
       <div className="pointer-events-none relative z-10 pr-4">
         <div className="flex items-start justify-between gap-4">
-          <h3 className="text-[15px] font-medium leading-snug text-text-primary transition-colors group-hover:text-accent">
+          <h3 className="text-mid font-medium leading-snug text-text-primary transition-colors group-hover:text-accent">
             {paper.title}
           </h3>
-          <span className="shrink-0 text-[13px] font-medium text-accent">
+          <span className="shrink-0 text-ui font-medium text-accent">
             {paper.claimCount} {paper.claimCount === 1 ? "claim" : "claims"}
           </span>
         </div>
         <p className="mt-1.5 text-sm text-text-secondary">
           {formatAuthors(paper.authors)}
         </p>
-        <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[12px] text-text-muted">
+        <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-small text-text-muted">
           {paper.arxivId && (
             <span className="font-mono">arXiv:{paper.arxivId}</span>
           )}
@@ -569,7 +569,7 @@ function PaperRow({
       </div>
 
       {/* Per-paper controls, revealed on hover. */}
-      <div className="absolute bottom-3 right-3 z-20 flex items-center gap-3 text-[12px]">
+      <div className="absolute bottom-3 right-3 z-20 flex items-center gap-3 text-small">
         {confirmingDelete ? (
           <div className="flex items-center gap-2">
             <span className="text-text-secondary">Delete everywhere?</span>
@@ -577,7 +577,7 @@ function PaperRow({
               type="button"
               disabled={busy}
               onClick={() => run(onDelete)}
-              className="font-medium text-[#b4493b] transition-opacity hover:opacity-80 disabled:opacity-40"
+              className="font-medium text-missing transition-opacity hover:opacity-80 disabled:opacity-40"
             >
               Yes
             </button>
@@ -605,7 +605,7 @@ function PaperRow({
               type="button"
               disabled={busy}
               onClick={() => setConfirmingDelete(true)}
-              className="text-text-muted transition-colors hover:text-[#b4493b] disabled:opacity-40"
+              className="text-text-muted transition-colors hover:text-missing disabled:opacity-40"
             >
               Delete
             </button>
@@ -639,19 +639,19 @@ function BatchProgress({
   return (
     <div className="mt-3 rounded-xl border border-border bg-surface p-3">
       {working ? (
-        <p className="mb-2 px-1 text-[13px] text-text-muted">
+        <p className="mb-2 px-1 text-ui text-text-muted">
           Ingesting {items.length} sources sequentially…
         </p>
       ) : (
         summary && (
-          <p className="mb-2 px-1 text-[13px] text-text-secondary">
+          <p className="mb-2 px-1 text-ui text-text-secondary">
             <span className="text-accent">{summary.ingested} ingested</span>
             {", "}
             <span className="text-text-muted">{summary.linked} linked</span>
             {", "}
             <span
               className={
-                summary.failed > 0 ? "text-[#b4493b]" : "text-text-muted"
+                summary.failed > 0 ? "text-missing" : "text-text-muted"
               }
             >
               {summary.failed} failed
@@ -663,7 +663,7 @@ function BatchProgress({
         {items.map((it, i) => (
           <li
             key={`${i}-${it.url}`}
-            className="flex items-center justify-between gap-3 px-1 py-2 text-[13px]"
+            className="flex items-center justify-between gap-3 px-1 py-2 text-ui"
           >
             <span className="min-w-0 flex-1 truncate text-text-secondary">
               {it.url}
@@ -689,7 +689,7 @@ function BatchProgress({
                 ))}
               {it.status === "failed" && (
                 <span className="flex items-center gap-2">
-                  <span className="text-[#b4493b]">
+                  <span className="text-missing">
                     {it.error ?? "failed"}
                   </span>
                   <button

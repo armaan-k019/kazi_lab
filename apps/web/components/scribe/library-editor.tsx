@@ -139,13 +139,13 @@ export function LibraryEditor({
   return (
     <div className="mt-3 rounded-xl border border-border bg-surface p-4">
       <div className="flex items-center justify-between">
-        <h3 className="text-[14px] font-medium text-text-primary">
+        <h3 className="text-body font-medium text-text-primary">
           {isEdit ? "Edit library" : "New library"}
         </h3>
         <button
           type="button"
           onClick={onClose}
-          className="text-[12px] text-text-muted transition-colors hover:text-text-primary"
+          className="text-small text-text-muted transition-colors hover:text-text-primary"
         >
           close
         </button>
@@ -230,9 +230,9 @@ export function LibraryEditor({
 
       {/* Conferences */}
       <div className="mt-5 border-t border-border pt-4">
-        <p className="text-[13px] font-medium text-text-secondary">Conferences</p>
+        <p className="text-ui font-medium text-text-secondary">Conferences</p>
         {!isEdit && (
-          <p className="mt-1 text-[12px] text-text-muted">
+          <p className="mt-1 text-small text-text-muted">
             Add conferences here; after you create the library you can synthesize
             each source into themes and dates.
           </p>
@@ -242,7 +242,7 @@ export function LibraryEditor({
         {isEdit && (
           <div className="mt-2 space-y-2">
             {conferences.length === 0 && (
-              <p className="text-[12px] text-text-muted">No conferences yet.</p>
+              <p className="text-small text-text-muted">No conferences yet.</p>
             )}
             {conferences.map((c) => (
               <ConferenceRow
@@ -255,7 +255,7 @@ export function LibraryEditor({
             <button
               type="button"
               onClick={addConference}
-              className="text-[12px] text-accent transition-opacity hover:opacity-80"
+              className="text-small text-accent transition-opacity hover:opacity-80"
             >
               + add conference
             </button>
@@ -278,7 +278,7 @@ export function LibraryEditor({
                     )
                   }
                   placeholder="conference name"
-                  className="w-40 rounded-md border border-border bg-surface px-2 py-1 text-[12px]"
+                  className="w-40 rounded-md border border-border bg-surface px-2 py-1 text-small"
                 />
                 <select
                   value={c.sourceKind}
@@ -291,7 +291,7 @@ export function LibraryEditor({
                       ),
                     )
                   }
-                  className="rounded-md border border-border bg-surface px-2 py-1 text-[12px]"
+                  className="rounded-md border border-border bg-surface px-2 py-1 text-small"
                 >
                   <option value="none">no source</option>
                   <option value="url">link</option>
@@ -308,7 +308,7 @@ export function LibraryEditor({
                       )
                     }
                     placeholder="CFP url"
-                    className="w-56 rounded-md border border-border bg-surface px-2 py-1 text-[12px]"
+                    className="w-56 rounded-md border border-border bg-surface px-2 py-1 text-small"
                   />
                 )}
                 {c.sourceKind === "text" && (
@@ -323,13 +323,13 @@ export function LibraryEditor({
                     }
                     placeholder="paste CFP / PDF text"
                     rows={2}
-                    className="w-full rounded-md border border-border bg-surface px-2 py-1 text-[12px]"
+                    className="w-full rounded-md border border-border bg-surface px-2 py-1 text-small"
                   />
                 )}
                 <button
                   type="button"
                   onClick={() => setStaged((s) => s.filter((_, j) => j !== i))}
-                  className="text-[12px] text-text-muted hover:text-[#b4493b]"
+                  className="text-small text-text-muted hover:text-missing"
                 >
                   remove
                 </button>
@@ -343,7 +343,7 @@ export function LibraryEditor({
                   { name: "", sourceKind: "none", sourceUrl: "", rawSourceText: "" },
                 ])
               }
-              className="text-[12px] text-accent transition-opacity hover:opacity-80"
+              className="text-small text-accent transition-opacity hover:opacity-80"
             >
               + add conference
             </button>
@@ -351,21 +351,21 @@ export function LibraryEditor({
         )}
       </div>
 
-      {error && <p className="mt-3 text-[13px] text-[#b4493b]">{error}</p>}
+      {error && <p className="mt-3 text-ui text-missing">{error}</p>}
 
       <div className="mt-4 flex items-center gap-2">
         <button
           type="button"
           onClick={save}
           disabled={busy || !fields.name.trim()}
-          className="rounded-md bg-accent px-3 py-1.5 text-[13px] font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-40"
+          className="rounded-md bg-accent px-3 py-1.5 text-ui font-medium text-paper transition-opacity hover:opacity-90 disabled:opacity-40"
         >
           {isEdit ? "Save changes" : "Create library"}
         </button>
         <button
           type="button"
           onClick={onClose}
-          className="px-2 py-1.5 text-[13px] text-text-muted transition-colors hover:text-text-primary"
+          className="px-2 py-1.5 text-ui text-text-muted transition-colors hover:text-text-primary"
         >
           Done
         </button>
@@ -397,15 +397,15 @@ function ConferenceRow({
   return (
     <div className="rounded-lg border border-border p-3">
       <div className="flex flex-wrap items-center gap-2">
-        <span className="text-[13px] font-medium text-text-primary">{conf.name}</span>
-        <span className="text-[11px] text-text-muted">
+        <span className="text-ui font-medium text-text-primary">{conf.name}</span>
+        <span className="text-caption text-text-muted">
           {conf.sourceKind === "none" ? "name only" : `source: ${conf.sourceKind}`}
         </span>
         {conf.synthStatus === "synthesized" && (
-          <span className="text-[11px] text-accent">synthesized</span>
+          <span className="text-caption text-accent">synthesized</span>
         )}
         {conf.synthStatus === "failed" && (
-          <span className="text-[11px] text-[#b4493b]">synth failed</span>
+          <span className="text-caption text-missing">synth failed</span>
         )}
         <span className="ml-auto flex items-center gap-3">
           {hasSource && (
@@ -413,7 +413,7 @@ function ConferenceRow({
               type="button"
               onClick={synthesize}
               disabled={synthing}
-              className="text-[12px] text-accent transition-opacity hover:opacity-80 disabled:opacity-50"
+              className="text-small text-accent transition-opacity hover:opacity-80 disabled:opacity-50"
             >
               {synthing ? "synthesizing…" : "synthesize context"}
             </button>
@@ -421,17 +421,17 @@ function ConferenceRow({
           <button
             type="button"
             onClick={onRemove}
-            className="text-[12px] text-text-muted hover:text-[#b4493b]"
+            className="text-small text-text-muted hover:text-missing"
           >
             remove
           </button>
         </span>
       </div>
       {conf.notes && (
-        <p className="mt-1 text-[11px] text-text-muted">{conf.notes}</p>
+        <p className="mt-1 text-caption text-text-muted">{conf.notes}</p>
       )}
       {conf.synthStatus === "synthesized" && (
-        <div className="mt-2 space-y-1 text-[12px] text-text-secondary">
+        <div className="mt-2 space-y-1 text-small text-text-secondary">
           {conf.scopeSummary && <p>{conf.scopeSummary}</p>}
           {conf.themes && conf.themes.length > 0 && (
             <p className="text-text-muted">themes: {conf.themes.join(", ")}</p>
@@ -446,12 +446,12 @@ function ConferenceRow({
 }
 
 const inputCls =
-  "w-full rounded-md border border-border bg-surface px-3 py-1.5 text-[13px] text-text-primary placeholder:text-text-muted focus:border-accent/50 focus:outline-none focus:ring-2 focus:ring-accent/15";
+  "w-full rounded-md border border-border bg-surface px-3 py-1.5 text-ui text-text-primary placeholder:text-text-muted focus:border-accent/50 focus:outline-none focus:ring-2 focus:ring-accent/15";
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <label className="block">
-      <span className="mb-1 block text-[12px] text-text-muted">{label}</span>
+      <span className="mb-1 block text-small text-text-muted">{label}</span>
       {children}
     </label>
   );

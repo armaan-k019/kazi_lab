@@ -77,7 +77,7 @@ export function ExperimentalistView() {
   return (
     <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.22, ease: "easeOut" }}>
       <h2 className="text-2xl font-semibold tracking-tight text-text-primary">Experimentalist</h2>
-      <p className="mt-1.5 max-w-2xl text-[13px] leading-relaxed text-text-muted">
+      <p className="mt-1.5 max-w-2xl text-ui leading-relaxed text-text-muted">
         Takes a claim plus an evidence scope of one or more projects, runs a deterministic
         quantitative meta-analysis of what the literature already reports (the math is code, not a
         model), interprets it, and designs a verifiable experiment spec. Nothing is executed; the
@@ -92,7 +92,7 @@ export function ExperimentalistView() {
               key={m.key}
               type="button"
               onClick={() => setMode(m.key)}
-              className={`rounded-full border px-3 py-1 text-[13px] transition-colors ${
+              className={`rounded-full border px-3 py-1 text-ui transition-colors ${
                 mode === m.key
                   ? "border-accent/50 bg-accent-dim text-accent"
                   : "border-border text-text-secondary hover:border-accent/30 hover:text-accent"
@@ -102,14 +102,14 @@ export function ExperimentalistView() {
             </button>
           ))}
         </div>
-        <p className="mt-2 text-[12px] text-text-muted">{MODES.find((m) => m.key === mode)?.blurb}</p>
+        <p className="mt-2 text-small text-text-muted">{MODES.find((m) => m.key === mode)?.blurb}</p>
 
         {inputs && (
           <div className="mt-3 flex flex-wrap items-center gap-3">
             <select
               value={selRef}
               onChange={(e) => setSelRef(e.target.value)}
-              className="max-w-xl flex-1 rounded-lg border border-border bg-surface-raised px-3 py-2 text-[13px] text-text-primary"
+              className="max-w-xl flex-1 rounded-lg border border-border bg-surface-raised px-3 py-2 text-ui text-text-primary"
             >
               {mode === "abstract" &&
                 inputs.abstracts.map((a) => (
@@ -134,30 +134,30 @@ export function ExperimentalistView() {
               type="button"
               onClick={run}
               disabled={running || !selRef}
-              className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:cursor-default disabled:opacity-50"
+              className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-paper transition-opacity hover:opacity-90 disabled:cursor-default disabled:opacity-50"
             >
               {running ? "Working…" : "Run experiment"}
             </button>
             {running && (
-              <span className="flex items-center gap-2 text-[13px] text-text-secondary">
+              <span className="flex items-center gap-2 text-ui text-text-secondary">
                 <Spinner /> pooling the literature, then interpreting and designing, this takes a minute…
               </span>
             )}
           </div>
         )}
         {inputs && mode === "abstract" && inputs.abstracts.length === 0 && (
-          <p className="mt-2 text-[12px] text-text-muted">No Critic abstracts yet. Run the per-library Critic first.</p>
+          <p className="mt-2 text-small text-text-muted">No Critic abstracts yet. Run the per-library Critic first.</p>
         )}
         {inputs && mode === "cross_domain_link" && inputs.links.length === 0 && (
-          <p className="mt-2 text-[12px] text-text-muted">No cross-domain links yet. Run cross-domain synthesis first.</p>
+          <p className="mt-2 text-small text-text-muted">No cross-domain links yet. Run cross-domain synthesis first.</p>
         )}
       </div>
 
-      {error && <p className="mt-4 text-[13px] text-[#b4493b]">{error}</p>}
+      {error && <p className="mt-4 text-ui text-missing">{error}</p>}
 
       {runData?.run && <ResultsDoc data={runData} />}
       {runData && !runData.run && (
-        <p className="mt-8 text-[15px] leading-relaxed text-text-muted">
+        <p className="mt-8 text-mid leading-relaxed text-text-muted">
           No experiment has been run yet. Pick a claim above and run one.
         </p>
       )}
@@ -175,21 +175,21 @@ function ResultsDoc({ data }: { data: ExperimentRun }) {
   return (
     <article className="mt-8 space-y-8">
       <header>
-        <p className="text-[11px] font-medium uppercase tracking-wide text-text-muted">Claim under test</p>
-        <p className="mt-1 text-[17px] font-medium leading-snug text-text-primary">{run.claim}</p>
-        <p className="mt-2 text-[12px] text-text-muted">
+        <p className="text-caption font-medium uppercase tracking-wide text-text-muted">Claim under test</p>
+        <p className="mt-1 text-lead font-medium leading-snug text-text-primary">{run.claim}</p>
+        <p className="mt-2 text-small text-text-muted">
           scope: {run.scope.join(", ")}
           {run.completedAt ? ` · ${formatRelativeTime(run.completedAt)}` : ""}
         </p>
-        {run.notes && <p className="mt-1 text-[12px] text-text-muted">{run.notes}</p>}
+        {run.notes && <p className="mt-1 text-small text-text-muted">{run.notes}</p>}
       </header>
 
       {/* META-ANALYSIS (computed) */}
       <section>
         <SectionLabel>Meta-analysis</SectionLabel>
-        <p className="mt-1 text-[12px] italic text-text-muted">{VALIDITY_STATEMENT}</p>
+        <p className="mt-1 text-small italic text-text-muted">{VALIDITY_STATEMENT}</p>
         {meta.length === 0 ? (
-          <p className="mt-3 text-[13px] text-text-muted">
+          <p className="mt-3 text-ui text-text-muted">
             No cross-paper poolable metric keys in this scope (a key needs the same dataset, metric,
             task, and conditions reported by at least two papers).
           </p>
@@ -208,7 +208,7 @@ function ResultsDoc({ data }: { data: ExperimentRun }) {
           <SectionLabel>Qualitative evidence</SectionLabel>
           {qual.map((q) => (
             <div key={q.libraryName} className="mt-3">
-              <p className="text-[13px] font-medium text-text-primary">
+              <p className="text-ui font-medium text-text-primary">
                 {q.libraryName}{" "}
                 <span className="font-normal text-text-muted">
                   — no structured metric layer yet; quantitative pooling unavailable. Audited-sound
@@ -217,7 +217,7 @@ function ResultsDoc({ data }: { data: ExperimentRun }) {
               </p>
               <ul className="mt-1.5 space-y-1">
                 {q.findings.map((f, j) => (
-                  <li key={j} className="text-[12px] leading-relaxed text-text-secondary">
+                  <li key={j} className="text-small leading-relaxed text-text-secondary">
                     • {f.excerpt}
                   </li>
                 ))}
@@ -233,29 +233,29 @@ function ResultsDoc({ data }: { data: ExperimentRun }) {
           <div className="flex items-center gap-2">
             <SectionLabel>Interpretation</SectionLabel>
             {interp.verdict && (
-              <span className="rounded-full px-2 py-0.5 text-[11px] font-medium text-accent" style={{ backgroundColor: "var(--surface-raised)" }}>
+              <span className="rounded-full px-2 py-0.5 text-caption font-medium text-accent" style={{ backgroundColor: "var(--surface-raised)" }}>
                 {interp.verdict}
               </span>
             )}
           </div>
-          <p className="mt-1 text-[11px] italic text-text-muted">Model reading of the computed tables, constrained to the numbers above.</p>
-          {interp.text && <p className="mt-2 text-[14px] leading-relaxed text-text-primary">{interp.text}</p>}
+          <p className="mt-1 text-caption italic text-text-muted">Model reading of the computed tables, constrained to the numbers above.</p>
+          {interp.text && <p className="mt-2 text-body leading-relaxed text-text-primary">{interp.text}</p>}
           {interp.caveats.length > 0 && (
             <div className="mt-3">
-              <p className="text-[12px] font-medium text-text-secondary">Caveats</p>
+              <p className="text-small font-medium text-text-secondary">Caveats</p>
               <ul className="mt-1 space-y-1">
                 {interp.caveats.map((c, i) => (
-                  <li key={i} className="text-[12px] leading-relaxed text-text-secondary">• {c}</li>
+                  <li key={i} className="text-small leading-relaxed text-text-secondary">• {c}</li>
                 ))}
               </ul>
             </div>
           )}
           {interp.unknowns.length > 0 && (
             <div className="mt-3">
-              <p className="text-[12px] font-medium text-text-secondary">Genuinely unknown (targeted by the spec)</p>
+              <p className="text-small font-medium text-text-secondary">Genuinely unknown (targeted by the spec)</p>
               <ul className="mt-1 space-y-1">
                 {interp.unknowns.map((u, i) => (
-                  <li key={i} className="text-[12px] leading-relaxed text-text-secondary">• {u}</li>
+                  <li key={i} className="text-small leading-relaxed text-text-secondary">• {u}</li>
                 ))}
               </ul>
             </div>
@@ -267,8 +267,8 @@ function ResultsDoc({ data }: { data: ExperimentRun }) {
       {spec && (
         <section>
           <SectionLabel>Experiment spec</SectionLabel>
-          <p className="mt-1 text-[11px] italic text-text-muted">Execution-ready design. Nothing is run here; a future executor consumes this.</p>
-          {spec.title && <p className="mt-2 text-[15px] font-semibold text-text-primary">{spec.title}</p>}
+          <p className="mt-1 text-caption italic text-text-muted">Execution-ready design. Nothing is run here; a future executor consumes this.</p>
+          {spec.title && <p className="mt-2 text-mid font-semibold text-text-primary">{spec.title}</p>}
           {spec.objective && <SpecField label="Objective">{spec.objective}</SpecField>}
           {spec.design?.arms && spec.design.arms.length > 0 && (
             <SpecField label="Design arms">
@@ -278,7 +278,7 @@ function ResultsDoc({ data }: { data: ExperimentRun }) {
                 ))}
               </ul>
               {spec.design.held_fixed && spec.design.held_fixed.length > 0 && (
-                <p className="mt-1.5 text-[12px] text-text-muted">held fixed: {spec.design.held_fixed.join(", ")}</p>
+                <p className="mt-1.5 text-small text-text-muted">held fixed: {spec.design.held_fixed.join(", ")}</p>
               )}
             </SpecField>
           )}
@@ -328,15 +328,15 @@ function MetaTable({ k }: { k: MetaKey }) {
   return (
     <div className="rounded-xl border border-border bg-surface p-4">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <p className="font-mono text-[12px] text-text-primary">
+        <p className="font-mono text-small text-text-primary">
           {k.dataset} · {k.metric} · {k.task} · {k.conditions}
         </p>
-        <span className="text-[11px] text-text-muted">
+        <span className="text-caption text-text-muted">
           COMPUTED · {k.nPapers} papers · {k.nMethods} methods · {higher ? "higher" : "lower"}-is-better
         </span>
       </div>
       <div className="mt-2 overflow-x-auto">
-        <table className="w-full text-[12px]">
+        <table className="w-full text-small">
           <thead>
             <tr className="text-left text-text-muted">
               <th className="py-1 pr-3 font-normal">method</th>
@@ -353,8 +353,8 @@ function MetaTable({ k }: { k: MetaKey }) {
                 <tr key={m.method} className="border-t border-border/60">
                   <td className="py-1 pr-3 text-text-primary">
                     {m.method}
-                    {m.pooledFromSelf && <span className="ml-1 text-[10px] text-accent">self</span>}
-                    {m.conflict && <span className="ml-1 text-[10px] text-[#b07a4f]">conflict</span>}
+                    {m.pooledFromSelf && <span className="ml-1 text-micro text-accent">self</span>}
+                    {m.conflict && <span className="ml-1 text-micro text-warm">conflict</span>}
                   </td>
                   <td className="py-1 pr-3 font-mono text-text-secondary">{m.pooledValue}</td>
                   <td className="py-1 pr-3 font-mono text-text-secondary">
@@ -370,12 +370,12 @@ function MetaTable({ k }: { k: MetaKey }) {
         </table>
       </div>
       {conflicts.length > 0 && (
-        <p className="mt-2 text-[11px] text-[#b07a4f]">
+        <p className="mt-2 text-caption text-warm">
           conflicts kept distinct: {conflicts.map((c) => `${c.method}=${c.values.join(" vs ")}`).join("; ")}
         </p>
       )}
       {vw && (
-        <p className="mt-2 text-[11px] text-text-muted">
+        <p className="mt-2 text-caption text-text-muted">
           variance-weighted subset: mean {vw.weightedMean.toFixed(3)} — {vw.note}
         </p>
       )}
@@ -384,13 +384,13 @@ function MetaTable({ k }: { k: MetaKey }) {
 }
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
-  return <h3 className="text-[13px] font-semibold uppercase tracking-wide text-text-secondary">{children}</h3>;
+  return <h3 className="text-ui font-semibold uppercase tracking-wide text-text-secondary">{children}</h3>;
 }
 function SpecField({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="mt-3">
-      <p className="text-[12px] font-medium text-text-secondary">{label}</p>
-      <div className="mt-0.5 text-[13px] leading-relaxed text-text-primary">{children}</div>
+      <p className="text-small font-medium text-text-secondary">{label}</p>
+      <div className="mt-0.5 text-ui leading-relaxed text-text-primary">{children}</div>
     </div>
   );
 }

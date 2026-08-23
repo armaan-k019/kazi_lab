@@ -81,7 +81,7 @@ export function ChatView({
       <button
         type="button"
         onClick={onBack}
-        className="mb-6 text-[13px] text-text-secondary transition-colors hover:text-accent"
+        className="mb-6 text-ui text-text-secondary transition-colors hover:text-accent"
       >
         ← Corpus
       </button>
@@ -89,7 +89,7 @@ export function ChatView({
       <h2 className="text-2xl font-semibold tracking-tight text-text-primary">
         Ask · {libraryName}
       </h2>
-      <p className="mt-1.5 text-[12px] text-text-muted">
+      <p className="mt-1.5 text-small text-text-muted">
         Answers are grounded only in this library&rsquo;s papers, with citations.
         Asking within <span className="text-accent">{libraryName}</span>.
       </p>
@@ -108,7 +108,7 @@ export function ChatView({
         {messages.map((m, i) =>
           m.role === "user" ? (
             <div key={i} className="flex justify-end">
-              <p className="max-w-[80%] rounded-2xl rounded-br-sm bg-surface-raised px-4 py-2 text-[14px] text-text-primary">
+              <p className="max-w-[80%] rounded-2xl rounded-br-sm bg-surface-raised px-4 py-2 text-body text-text-primary">
                 {m.content}
               </p>
             </div>
@@ -118,13 +118,13 @@ export function ChatView({
         )}
 
         {sending && (
-          <div className="flex items-center gap-2 text-[13px] text-text-secondary">
+          <div className="flex items-center gap-2 text-ui text-text-secondary">
             <Spinner /> thinking…
           </div>
         )}
       </div>
 
-      {error && <p className="mt-3 text-[13px] text-[#b4493b]">{error}</p>}
+      {error && <p className="mt-3 text-ui text-missing">{error}</p>}
 
       <form onSubmit={ask} className="mt-5 flex gap-2.5">
         <input
@@ -138,7 +138,7 @@ export function ChatView({
         <button
           type="submit"
           disabled={sending || input.trim().length === 0}
-          className="rounded-lg bg-accent px-5 py-2.5 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:cursor-default disabled:opacity-40"
+          className="rounded-lg bg-accent px-5 py-2.5 text-sm font-medium text-paper transition-opacity hover:opacity-90 disabled:cursor-default disabled:opacity-40"
         >
           Ask
         </button>
@@ -158,17 +158,17 @@ function AssistantMessage({
   return (
     <div className="max-w-[88%]">
       {message.refused && (
-        <span className="mb-1 inline-block rounded-full bg-surface-raised px-2 py-0.5 text-[11px] font-medium text-text-muted">
+        <span className="mb-1 inline-block rounded-full bg-surface-raised px-2 py-0.5 text-caption font-medium text-text-muted">
           not covered by this library
         </span>
       )}
-      <p className="whitespace-pre-wrap text-[15px] leading-[1.65] text-text-primary">
+      <p className="whitespace-pre-wrap text-mid leading-[1.65] text-text-primary">
         {message.content}
       </p>
 
       {message.citations && message.citations.length > 0 && (
         <div className="mt-3">
-          <p className="text-[11px] font-medium text-text-muted">
+          <p className="text-caption font-medium text-text-muted">
             Grounded in
           </p>
           <div className="mt-1.5 flex flex-wrap gap-2">
@@ -177,7 +177,7 @@ function AssistantMessage({
                 key={c.paperId}
                 type="button"
                 onClick={() => onOpenPaper(c.paperId)}
-                className="rounded-full bg-accent-dim px-2.5 py-1 text-[12px] text-accent transition-opacity hover:opacity-80"
+                className="rounded-full bg-accent-dim px-2.5 py-1 text-small text-accent transition-opacity hover:opacity-80"
               >
                 {c.paperTitle}
               </button>
@@ -191,14 +191,14 @@ function AssistantMessage({
           <button
             type="button"
             onClick={() => setShowSources((v) => !v)}
-            className="text-[12px] text-text-muted transition-colors hover:text-accent"
+            className="text-small text-text-muted transition-colors hover:text-accent"
           >
             {showSources ? "hide sources" : `sources (${message.usedChunks.length})`}
           </button>
           {showSources && (
             <ul className="mt-2 space-y-2 border-l border-border pl-3">
               {message.usedChunks.map((u, i) => (
-                <li key={i} className="text-[12px] text-text-muted">
+                <li key={i} className="text-small text-text-muted">
                   <span className="text-text-secondary">{u.paperTitle}</span>{" "}
                   <span className="text-text-muted">
                     ({u.similarity.toFixed(2)})

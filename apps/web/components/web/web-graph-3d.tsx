@@ -8,12 +8,16 @@ import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
 import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
 import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
 import type { WebAbcCandidate, WebCommunity, WebGraphEdge, WebGraphNode } from "@/lib/types";
+import { AMBIENT, PORTAL } from "@/lib/design-tokens";
 
 // ---------------------------------------------------------------------------
 // All tuning constants centralized here per the codebase convention.
 // ---------------------------------------------------------------------------
-const BG = 0x0b0d10;
+const BG = PORTAL.bg;
 const HEIGHT = 560;
+// Focus-mode overlay inset: clears the header + nav + status stack when the
+// field is full-viewport.
+const FOCUS_TOP_PX = 158;
 const LAYOUT_SCALE = 52; // scale normalized t-SNE coords into the scene
 const CAMERA_START = 72; // close enough that the cloud fills the frame
 const PIXEL_RATIO_CAP = 2; // retina displays do not get to tank the frame rate
@@ -34,19 +38,8 @@ const LEGEND_HOVER_DIM = 0.55; // partial dim mix (0..1) when hovering a legend 
 
 // Community palette: desaturated-but-luminous hues, calm not neon. Index i
 // colors community i mod length. Unassigned nodes get the neutral last-ish grey.
-const COMMUNITY_PALETTE: number[] = [
-  0x7da2d9, // slate blue
-  0x8fc4a5, // sage
-  0xc79bd9, // lilac
-  0xd98f8f, // muted rose
-  0x76bcc4, // teal mist
-  0xccb37a, // ochre
-  0x9b90d9, // periwinkle
-  0xd9a3c0, // dusty pink
-  0x90b878, // moss
-  0x8a95a8, // neutral grey-blue
-];
-const UNASSIGNED_COLOR = 0x8a95a8;
+const COMMUNITY_PALETTE: readonly number[] = PORTAL.communityPalette;
+const UNASSIGNED_COLOR = PORTAL.unassigned;
 
 // Edges. ON by default; two visual classes. Intra-community edges are faint and
 // community-hued, kept only for the top-K strongest per node so structure shows
@@ -58,7 +51,7 @@ const INTRA_ALPHA = 0.10;
 // Reduced ~20 percent from 0.42: with the soft clouds behind them the old
 // brightness read as clutter.
 const BRIDGE_ALPHA = 0.34;
-const BRIDGE_COLOR = 0xe0b48a; // warm neutral so bridges visually pop
+const BRIDGE_COLOR = PORTAL.bridge; // warm neutral so bridges visually pop
 const BRIDGE_ARC_SEGMENTS = 10; // bezier samples per bridge edge
 const BRIDGE_ARC_LIFT = 0.14; // arc height as a fraction of edge length
 const EGO_EDGE_BOOST = 1.8; // edge alpha multiplier inside a selected ego network
@@ -81,7 +74,7 @@ const CLOUD_DRIFT_POS = 0.5; // idle positional drift amplitude in world units; 
 const CLOUD_DRIFT_PERIOD_MS_MIN = 8000; // slowest-to-fastest drift period band per sprite
 const CLOUD_DRIFT_PERIOD_MS_MAX = 15000;
 const CLOUD_INSIDE_FADE = 1.15; // camera closer than extent x this fades that community's cloud
-const LABEL_COLOR = "#dde3ec";
+const LABEL_COLOR = PORTAL.labelColor;
 const LABEL_MAX_OPACITY = 0.85;
 const LABEL_FADE_NEAR = 14; // camera closer than this to a centroid fades its label
 const LABEL_FADE_RANGE = 14;
@@ -346,6 +339,7 @@ type HoverInfo = { label: string; community: number | null; influence: number; x
 // Imperative scene handle: React state changes call into this instead of
 // rebuilding the scene.
 type SceneApi = {
+  setMode(mode: "ambient" | "focus"): void;
   setEdgeMode(showEdges: boolean, bridgesOnly: boolean): void;
   setCloudMode(showClouds: boolean): void;
   setArrowMode(showArrows: boolean): void;
@@ -377,6 +371,8 @@ export function WebGraph3D({
   communities,
   abc = [],
   activity = ACTIVITY_BASE,
+  mode = "focus",
+  ambientActivityScale = AMBIENT.activityScale,
   fillParent = false,
   fullscreenTarget,
   onSelect,
@@ -390,6 +386,12 @@ export function WebGraph3D({
   abc?: WebAbcCandidate[];
   // 0..1, derived from real scheduler state (idle / executing / just done).
   activity?: number;
+  // ONE canvas, TWO states: "focus" is the interactive portal at full
+  // clarity; "ambient" is the same scene dimmed behind the veil, throttled
+  // (DPR 1, halved pulses, frame-budget freeze), and non-interactive.
+  mode?: "ambient" | "focus";
+  // Multiplies activity-driven intensity while ambient (dev-tunable).
+  ambientActivityScale?: number;
   // Fill the parent's height (the shell sizes the portal region) instead of
   // the fixed standalone HEIGHT.
   fillParent?: boolean;
@@ -423,6 +425,10 @@ export function WebGraph3D({
   onSelectRef.current = onSelect;
   const activityRef = useRef(activity);
   activityRef.current = Math.min(1, Math.max(0, activity));
+  const modeRef = useRef(mode);
+  modeRef.current = mode;
+  const ambientScaleRef = useRef(ambientActivityScale);
+  ambientScaleRef.current = ambientActivityScale;
   const onThoughtCaptionClickRef = useRef(onThoughtCaptionClick);
   onThoughtCaptionClickRef.current = onThoughtCaptionClick;
   const onSelectionChangeRef = useRef(onSelectionChange);
@@ -1100,7 +1106,29 @@ export function WebGraph3D({
     // -----------------------------------------------------------------------
     const defaultTarget = new THREE.Vector3(0, 0, 0);
     const defaultPos = new THREE.Vector3(0, 0, CAMERA_START);
+    // Ambient guardrails: frame-cost accounting and the freeze fallback.
+    let frameCostSum = 0;
+    let frameCostCount = 0;
+    let frozen = false;
+    const applyMode = (m: "ambient" | "focus") => {
+      controls.enabled = m === "focus";
+      const dpr = m === "focus" ? Math.min(window.devicePixelRatio, PIXEL_RATIO_CAP) : AMBIENT.dprCap;
+      renderer.setPixelRatio(dpr);
+      composer.setPixelRatio(dpr);
+      const w = mount.clientWidth || 800;
+      const h = mount.clientHeight || HEIGHT;
+      renderer.setSize(w, h);
+      composer.setSize(w, h);
+      bloom.setSize(w, h);
+      // Entering focus always wakes a frozen field; ambient gets a fresh
+      // measurement window afterwards.
+      frozen = false;
+      frameCostSum = 0;
+      frameCostCount = 0;
+      renderer.domElement.classList.remove("field-frozen");
+    };
     apiRef.current = {
+      setMode: applyMode,
       setEdgeMode(edgesOn: boolean, onlyBridges: boolean) {
         intraLines.visible = edgesOn && !onlyBridges;
         bridgeLines.visible = edgesOn;
@@ -1194,12 +1222,20 @@ export function WebGraph3D({
     let raf = 0;
     let disposed = false;
     let lastFrameT = performance.now();
+    // AMBIENT SHOWS ZERO TEXT: community labels are focus-only, like every
+    // other text overlay. This eases 0..1 with the mode so the veil
+    // transition never pops a label in or out.
+    let labelModeFade = modeRef.current === "focus" ? 1 : 0;
     const animate = () => {
       if (disposed) return;
       raf = requestAnimationFrame(animate);
       const nowT = performance.now();
       const dt = Math.min(0.05, (nowT - lastFrameT) / 1000);
       lastFrameT = nowT;
+      // Frozen ambient field: the canvas keeps its last presented frame and
+      // drifts via CSS; per-frame work drops to this early return.
+      if (frozen && modeRef.current === "ambient") return;
+      const frameT0 = performance.now();
 
       // Camera easing.
       if (ease) {
@@ -1226,11 +1262,14 @@ export function WebGraph3D({
       }
 
       // Label opacity: recede with distance, fade out when the camera is deep
-      // inside a cluster so labels never obscure the points.
+      // inside a cluster, and vanish entirely in ambient (text never bleeds
+      // through foreground content).
+      labelModeFade += ((modeRef.current === "focus" ? 1 : 0) - labelModeFade) * Math.min(1, dt * 4);
       for (const { sprite, center } of labelSprites) {
         const dist = camera.position.distanceTo(center);
         const fade = Math.min(1, Math.max(0, (dist - LABEL_FADE_NEAR) / LABEL_FADE_RANGE));
-        (sprite.material as THREE.SpriteMaterial).opacity = LABEL_MAX_OPACITY * fade;
+        (sprite.material as THREE.SpriteMaterial).opacity = LABEL_MAX_OPACITY * fade * labelModeFade;
+        sprite.visible = labelModeFade > 0.01;
       }
 
       // Community clouds: fade toward their target (toggle, legend emphasis,
@@ -1264,11 +1303,13 @@ export function WebGraph3D({
       // ---------------------------------------------------------------------
       // LIVING BRAIN, per frame. Everything below walks real structure only.
       // ---------------------------------------------------------------------
-      const level = Math.min(1, Math.max(0, activityRef.current));
+      const ambient = modeRef.current === "ambient";
+      const level = Math.min(1, Math.max(0, activityRef.current)) * (ambient ? ambientScaleRef.current : 1);
+      const pulseMode = ambient ? AMBIENT.pulseScale : 1; // mandated ambient halving
       intraMat.uniforms.uTime.value = nowT / 1000;
       bridgeMat.uniforms.uTime.value = nowT / 1000;
-      intraMat.uniforms.uPulseDensity.value = reducedMotion ? 0 : PULSE_DENSITY_INTRA * (0.3 + 1.4 * level);
-      bridgeMat.uniforms.uPulseDensity.value = reducedMotion ? 0 : PULSE_DENSITY_BRIDGE * (0.3 + 1.4 * level);
+      intraMat.uniforms.uPulseDensity.value = reducedMotion ? 0 : PULSE_DENSITY_INTRA * (0.3 + 1.4 * level) * pulseMode;
+      bridgeMat.uniforms.uPulseDensity.value = reducedMotion ? 0 : PULSE_DENSITY_BRIDGE * (0.3 + 1.4 * level) * pulseMode;
       bloom.strength = BLOOM_BASE + BLOOM_ACTIVITY_GAIN * level;
 
       if (!reducedMotion) {
@@ -1370,8 +1411,36 @@ export function WebGraph3D({
 
       controls.update();
       composer.render();
+
+      // Ambient frame budget: average the loop's JS cost over a window; if
+      // it exceeds the budget while ambient, freeze to the cached frame with
+      // a slow CSS drift and log it.
+      frameCostSum += performance.now() - frameT0;
+      frameCostCount += 1;
+      if (frameCostCount >= 120) {
+        const avg = frameCostSum / frameCostCount;
+        frameCostSum = 0;
+        frameCostCount = 0;
+        if (modeRef.current === "ambient" && avg > AMBIENT.frameBudgetMs && !frozen) {
+          frozen = true;
+          renderer.domElement.classList.add("field-frozen");
+          console.warn(`[field] ambient frame cost ${avg.toFixed(1)}ms exceeds ${AMBIENT.frameBudgetMs}ms budget; freezing ambient field to cached frame`);
+        }
+      }
     };
     animate();
+    applyMode(modeRef.current);
+
+    // Hidden tab: pause rendering entirely; resume on return.
+    const onVisibility = () => {
+      if (document.hidden) {
+        cancelAnimationFrame(raf);
+      } else if (!disposed) {
+        lastFrameT = performance.now();
+        animate();
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibility);
 
     // Dev-only frame-cost probe: measures the synchronous render cost of 60
     // frames so performance is measurable even when RAF is throttled (hidden
@@ -1412,6 +1481,7 @@ export function WebGraph3D({
     return () => {
       disposed = true;
       cancelAnimationFrame(raf);
+      document.removeEventListener("visibilitychange", onVisibility);
       resizeObserver.disconnect();
       renderer.domElement.removeEventListener("pointermove", onPointerMove);
       renderer.domElement.removeEventListener("pointerdown", onPointerDown);
@@ -1450,6 +1520,9 @@ export function WebGraph3D({
     apiRef.current?.setCloudMode(showClouds);
   }, [showClouds]);
   useEffect(() => {
+    apiRef.current?.setMode(mode);
+  }, [mode]);
+  useEffect(() => {
     apiRef.current?.setArrowMode(showArrows);
   }, [showArrows]);
 
@@ -1483,8 +1556,9 @@ export function WebGraph3D({
   };
 
   if (placed.length === 0) {
+    if (mode !== "focus") return null;
     return (
-      <p className="py-10 text-center text-[13px] text-text-muted">
+      <p className="py-10 text-center text-ui text-ink-500">
         No 3D coordinates in this build (t-SNE needs paper embeddings). Rebuild the web after embedding the corpus.
       </p>
     );
@@ -1494,7 +1568,7 @@ export function WebGraph3D({
     <div
       ref={wrapperRef}
       className={`relative ${fillParent ? "h-full" : ""}`}
-      style={isFullscreen ? { backgroundColor: "#0b0d10" } : undefined}
+      style={isFullscreen ? { backgroundColor: "var(--portal-bg)" } : undefined}
     >
       <div
         ref={mountRef}
@@ -1502,14 +1576,14 @@ export function WebGraph3D({
         style={{ height: fillParent ? "100%" : isFullscreen ? "100vh" : HEIGHT }}
       >
         {/* Vignette: DOM overlay, zero GPU cost in-scene. */}
-        <div className="pointer-events-none absolute inset-0 z-10" style={{ background: "radial-gradient(ellipse at center, transparent 55%, rgba(4,6,8,0.55) 100%)" }} />
+        <div className="pointer-events-none absolute inset-0 z-10" style={{ background: PORTAL.vignette }} />
         {/* The thought caption: which REAL ABC chain is playing right now.
             Clicking opens that candidate in the Discoveries list. */}
-        {thoughtCaption && (
+        {mode === "focus" && thoughtCaption && (
           <button
             type="button"
             onClick={() => onThoughtCaptionClickRef.current?.(thoughtCaption.index)}
-            className="absolute bottom-3 left-1/2 z-20 -translate-x-1/2 rounded-lg border border-border bg-surface/80 px-3 py-1.5 text-left font-mono text-[11px] text-text-secondary backdrop-blur-sm transition-colors hover:border-accent/40 hover:text-accent"
+            className="glass absolute bottom-6 left-1/2 z-20 -translate-x-1/2 px-3 py-1.5 text-left font-mono text-caption text-ink-600 transition-colors hover:text-green-deep"
           >
             <span className="mr-1.5 text-text-muted">thinking:</span>
             {thoughtCaption.label}
@@ -1517,15 +1591,17 @@ export function WebGraph3D({
         )}
       </div>
 
-      {/* Compact toolbar, top-left ON the canvas: view toggles as chips. */}
-      <div className="absolute left-2 top-2 z-20 flex flex-wrap items-center gap-1.5">
+      {/* Compact toolbar ON the field, focus mode only: view toggles plus
+          reset and fullscreen (the dock owns the viewport's right side). */}
+      {mode === "focus" && (
+      <div className="absolute left-4 z-20 flex flex-wrap items-center gap-1.5" style={{ top: FOCUS_TOP_PX }}>
         <ToolChip active={showEdges} onClick={() => setShowEdges((v) => !v)} label="edges" />
         <ToolChip active={bridgesOnly} disabled={!showEdges} onClick={() => setBridgesOnly((v) => !v)} label="bridges only" />
         <ToolChip active={showArrows} disabled={!showEdges} onClick={() => setShowArrows((v) => !v)} label="direction" />
         <ToolChip active={showClouds} onClick={() => setShowClouds((v) => !v)} label="clouds" />
         {selected && <ToolChip active={false} onClick={() => apiRef.current?.setSelection(selected, true)} label="expand network" />}
         <span
-          className="cursor-help rounded-full border border-border bg-surface/70 px-1.5 py-0.5 text-[11px] text-text-muted"
+          className="cursor-help rounded-full border border-border bg-surface/70 px-1.5 py-0.5 text-caption text-text-muted"
           title={`drag to orbit (grab-the-world), scroll to zoom, right-drag to pan
 hover: paper title · click: light its network (shift-click grows a hop)
 double-click: open the paper · click empty space or Esc: clear
@@ -1536,44 +1612,42 @@ ${drawnEdgeCounts ? `${drawnEdgeCounts.intra} intra + ${drawnEdgeCounts.bridge} 
         {process.env.NODE_ENV === "development" && (
           <ToolChip active={devOpen} onClick={() => setDevOpen((v) => !v)} label="dev" />
         )}
+        <ToolChip active={false} onClick={() => apiRef.current?.resetView()} label="reset view" />
+        <ToolChip active={isFullscreen} onClick={toggleFullscreen} label={isFullscreen ? "exit fullscreen" : "fullscreen"} />
+        {isFullscreen && <span className="rounded bg-paper/70 px-2 py-0.5 text-caption text-ink-500">Esc to exit</span>}
       </div>
-      {process.env.NODE_ENV === "development" && devOpen && (
-        <div className="absolute left-2 top-10 z-20 flex flex-col gap-1 rounded-lg border border-dashed border-border bg-surface/85 px-3 py-2 backdrop-blur-sm">
+      )}
+      {mode === "focus" && process.env.NODE_ENV === "development" && devOpen && (
+        <div className="glass-raised absolute left-4 z-20 flex flex-col gap-1 px-3 py-2" style={{ top: FOCUS_TOP_PX + 36 }}>
           <DevSlider label="cloud opacity" min={0} max={2} step={0.05} initial={1} onChange={(v) => apiRef.current?.setDevTuning({ cloudOpacity: v })} />
           <DevSlider label="cloud scale" min={0.4} max={1.8} step={0.05} initial={1} onChange={(v) => apiRef.current?.setDevTuning({ cloudScale: v })} />
           <DevSlider label="bridge opacity" min={0} max={2} step={0.05} initial={1} onChange={(v) => apiRef.current?.setDevTuning({ bridgeAlpha: v })} />
         </div>
       )}
 
-      {/* Top-right: reset + fullscreen (Esc hint while fullscreen). */}
-      <div className="absolute right-2 top-2 z-20 flex items-center gap-1.5">
-        {isFullscreen && <span className="rounded bg-surface/70 px-2 py-0.5 text-[11px] text-text-muted">Esc to exit</span>}
-        <ToolChip active={false} onClick={() => apiRef.current?.resetView()} label="reset view" />
-        <ToolChip active={isFullscreen} onClick={toggleFullscreen} label={isFullscreen ? "exit fullscreen" : "fullscreen"} />
-      </div>
-
-      {/* Interactive legend, bottom-left ON the canvas: hover highlights a
-          community, click isolates it. */}
-      <div className="absolute bottom-2 left-2 z-20 flex max-w-[70%] flex-wrap items-center gap-1.5" onMouseLeave={() => legendHover(null)}>
+      {/* Interactive legend, bottom-left ON the field, focus mode only. */}
+      {mode === "focus" && (
+      <div className="absolute bottom-4 left-4 z-20 flex max-w-[70%] flex-wrap items-center gap-1.5" onMouseLeave={() => legendHover(null)}>
         {communities.map((c) => (
           <button
             key={c.index}
             type="button"
             onMouseEnter={() => legendHover(c.index)}
             onClick={() => legendClick(c.index)}
-            className={`flex items-center gap-1.5 rounded-full border bg-surface/70 px-2 py-0.5 text-[11px] backdrop-blur-sm transition-colors ${isolated === c.index ? "border-accent/60 text-text-primary" : "border-border text-text-secondary hover:border-accent/30"}`}
+            className={`flex items-center gap-1.5 rounded-full border bg-surface/70 px-2 py-0.5 text-caption backdrop-blur-sm transition-colors ${isolated === c.index ? "border-accent/60 text-text-primary" : "border-border text-text-secondary hover:border-accent/30"}`}
           >
             <span className="inline-block h-2 w-2 rounded-full" style={{ backgroundColor: `#${communityColor(c.index).toString(16).padStart(6, "0")}` }} />
             {c.label ?? `community ${c.index}`}
-            <span className="text-text-muted">{c.size}</span>
+            <span className="text-ink-500">{c.size}</span>
           </button>
         ))}
       </div>
+      )}
 
-      {hover && (
-        <div className="pointer-events-none absolute z-30 max-w-sm rounded-lg border border-border bg-surface-raised px-3 py-2 text-[12px] text-text-primary shadow-sm" style={{ left: Math.min(hover.x + 12, (mountRef.current?.clientWidth ?? 600) - 220), top: hover.y + 12 }}>
+      {mode === "focus" && hover && (
+        <div className="pointer-events-none absolute z-30 max-w-sm rounded-lg border border-border bg-surface-raised px-3 py-2 text-small text-text-primary shadow-sm" style={{ left: Math.min(hover.x + 12, (mountRef.current?.clientWidth ?? 600) - 220), top: hover.y + 12 }}>
           {hover.label}
-          <span className="mt-0.5 block text-[11px] text-text-muted">
+          <span className="mt-0.5 block text-caption text-text-muted">
             {hover.community !== null ? commLabel.get(hover.community) ?? `community ${hover.community}` : "unassigned"} · influence {hover.influence}
           </span>
         </div>
@@ -1589,7 +1663,7 @@ function ToolChip({ label, active, disabled, onClick }: { label: string; active:
       type="button"
       disabled={disabled}
       onClick={onClick}
-      className={`rounded-full border bg-surface/70 px-2 py-0.5 text-[11px] backdrop-blur-sm transition-colors disabled:opacity-40 ${
+      className={`rounded-full border bg-surface/70 px-2 py-0.5 text-caption backdrop-blur-sm transition-colors disabled:opacity-40 ${
         active ? "border-accent/50 text-accent" : "border-border text-text-secondary hover:border-accent/30 hover:text-accent"
       }`}
     >
@@ -1603,7 +1677,7 @@ function ToolChip({ label, active, disabled, onClick }: { label: string; active:
 function DevSlider({ label, min, max, step, initial, onChange }: { label: string; min: number; max: number; step: number; initial: number; onChange: (v: number) => void }) {
   const [value, setValue] = useState(initial);
   return (
-    <label className="flex items-center gap-1.5 text-[11px] text-text-secondary">
+    <label className="flex items-center gap-1.5 text-caption text-text-secondary">
       {label}
       <input
         type="range"
@@ -1618,7 +1692,7 @@ function DevSlider({ label, min, max, step, initial, onChange }: { label: string
         }}
         className="h-1 w-24"
       />
-      <span className="w-8 font-mono text-[10px] text-text-muted">{value.toFixed(2)}</span>
+      <span className="w-8 font-mono text-micro text-text-muted">{value.toFixed(2)}</span>
     </label>
   );
 }

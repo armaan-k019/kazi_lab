@@ -12,7 +12,7 @@ import { formatRelativeTime } from "@/lib/format";
 import { isAllPapersLibrary } from "@/lib/library";
 
 const ACCENT = "var(--accent)";
-const FLAG = "#b4493b";
+const FLAG = "var(--missing)";
 const MUTED = "var(--text-muted)";
 
 // Sound verdicts read calm (accent), adverse ones are flagged (warm red), and
@@ -24,7 +24,7 @@ function verdictColor(v: string): string {
 }
 function severityColor(s: string | null): string {
   if (s === "high") return FLAG;
-  if (s === "medium") return "#b07a4f";
+  if (s === "medium") return "var(--warm)";
   return MUTED;
 }
 const sevRank: Record<string, number> = { high: 3, medium: 2, low: 1 };
@@ -98,7 +98,7 @@ export function CriticView() {
       <h2 className="text-2xl font-semibold tracking-tight text-text-primary">
         Critic
       </h2>
-      <p className="mt-1.5 max-w-2xl text-[13px] leading-relaxed text-text-muted">
+      <p className="mt-1.5 max-w-2xl text-ui leading-relaxed text-text-muted">
         An adversarial review of a library&rsquo;s synthesis: which contradictions
         are real, which finding labels are inflated, and where findings outrun
         their evidence. It confirms sound conclusions and flags a minority with
@@ -113,7 +113,7 @@ export function CriticView() {
               key={l.id}
               type="button"
               onClick={() => setActiveId(l.id)}
-              className={`rounded-full border px-3 py-1 text-[13px] transition-colors ${
+              className={`rounded-full border px-3 py-1 text-ui transition-colors ${
                 l.id === activeId
                   ? "border-accent/50 bg-accent-dim text-accent"
                   : "border-border text-text-secondary hover:border-accent/30 hover:text-accent"
@@ -126,11 +126,11 @@ export function CriticView() {
         </div>
       )}
 
-      {error && <p className="mt-4 text-[13px] text-[#b4493b]">{error}</p>}
+      {error && <p className="mt-4 text-ui text-missing">{error}</p>}
 
       {/* General library: not critiqued. */}
       {isGeneral && (
-        <p className="mt-8 max-w-md text-[15px] leading-relaxed text-text-muted">
+        <p className="mt-8 max-w-md text-mid leading-relaxed text-text-muted">
           The general library is an all-papers view and is not critiqued. Switch
           to a research library to audit its synthesis.
         </p>
@@ -161,7 +161,7 @@ function CritiqueBody({
 }) {
   if (!data.hasSynthesis) {
     return (
-      <p className="mt-8 max-w-md text-[15px] leading-relaxed text-text-muted">
+      <p className="mt-8 max-w-md text-mid leading-relaxed text-text-muted">
         Synthesize {libraryName} first. The Critic audits a completed synthesis
         run; there is nothing to review yet.
       </p>
@@ -177,17 +177,17 @@ function CritiqueBody({
           type="button"
           onClick={onCritique}
           disabled={critiquing}
-          className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:cursor-default disabled:opacity-50"
+          className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-paper transition-opacity hover:opacity-90 disabled:cursor-default disabled:opacity-50"
         >
           {data.run ? "Re-critique" : "Critique"}
         </button>
         {critiquing && (
-          <span className="flex items-center gap-2 text-[13px] text-text-secondary">
+          <span className="flex items-center gap-2 text-ui text-text-secondary">
             <Spinner /> critiquing the synthesis, this takes a minute…
           </span>
         )}
         {!critiquing && data.run && (
-          <span className="text-[13px] text-text-muted">
+          <span className="text-ui text-text-muted">
             Last critiqued {formatRelativeTime(data.run.completedAt)} ·{" "}
             {data.contradictions.length} contradictions,{" "}
             {data.findings.length} findings audited
@@ -196,18 +196,18 @@ function CritiqueBody({
       </div>
 
       {data.run?.notes && (
-        <p className="mt-2 text-[12px] text-text-muted">{data.run.notes}</p>
+        <p className="mt-2 text-small text-text-muted">{data.run.notes}</p>
       )}
 
       {!data.run && !critiquing && (
-        <p className="mt-3 text-[13px] text-text-muted">
+        <p className="mt-3 text-ui text-text-muted">
           Not yet critiqued. Run a critique to audit this synthesis.
         </p>
       )}
 
       {data.run && data.abstract && (
         <section className="mt-8 rounded-xl border border-accent/30 bg-accent-dim/40 p-5">
-          <p className="text-[11px] font-medium uppercase tracking-wide text-accent">
+          <p className="text-caption font-medium uppercase tracking-wide text-accent">
             Direction-setting abstract
           </p>
           {data.abstract.title && (
@@ -216,23 +216,23 @@ function CritiqueBody({
             </h3>
           )}
           {data.abstract.abstractText && (
-            <p className="mt-2 text-[15px] leading-relaxed text-text-primary">
+            <p className="mt-2 text-mid leading-relaxed text-text-primary">
               {data.abstract.abstractText}
             </p>
           )}
           {data.abstract.claimToTest && (
-            <p className="mt-3 text-[14px] text-text-secondary">
+            <p className="mt-3 text-body text-text-secondary">
               <span className="font-medium text-text-primary">Claim to test:</span>{" "}
               {data.abstract.claimToTest}
             </p>
           )}
           {data.abstract.direction && (
-            <p className="mt-1.5 text-[14px] text-text-secondary">
+            <p className="mt-1.5 text-body text-text-secondary">
               <span className="font-medium text-text-primary">Direction:</span>{" "}
               {data.abstract.direction}
             </p>
           )}
-          <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-[12px] text-text-muted">
+          <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-small text-text-muted">
             <span>
               grounded on {data.abstract.groundedOn?.length ?? 0} audited-sound
               item(s)
@@ -247,7 +247,7 @@ function CritiqueBody({
         </section>
       )}
       {data.run && !data.abstract && (
-        <p className="mt-6 text-[13px] text-text-muted">
+        <p className="mt-6 text-ui text-text-muted">
           No abstract generated for this run.
         </p>
       )}
@@ -258,7 +258,7 @@ function CritiqueBody({
           <section className="mt-8">
             <PanelLabel>What to look at</PanelLabel>
             {adverse.length === 0 ? (
-              <p className="mt-2 text-[14px] text-accent">
+              <p className="mt-2 text-body text-accent">
                 No issues flagged. The Critic confirmed the synthesis as sound.
               </p>
             ) : (
@@ -266,7 +266,7 @@ function CritiqueBody({
                 {adverse.map((a) => (
                   <li
                     key={a.key}
-                    className="flex items-start gap-2.5 text-[13px]"
+                    className="flex items-start gap-2.5 text-ui"
                   >
                     <SeverityBadge severity={a.severity} />
                     <span className="text-text-secondary">{a.summary}</span>
@@ -350,25 +350,25 @@ function ContradictionCard({ c }: { c: CriticContradiction }) {
       <div className="flex flex-wrap items-center gap-2">
         <Badge color={verdictColor(c.verdict)}>{c.verdict.replace("_", " ")}</Badge>
         {c.confidence && (
-          <span className="text-[12px] text-text-muted">{c.confidence} confidence</span>
+          <span className="text-small text-text-muted">{c.confidence} confidence</span>
         )}
         {c.verdict !== "genuine" && <SeverityBadge severity={c.severity} />}
       </div>
-      <p className="mt-3 text-[13px] text-text-primary">
+      <p className="mt-3 text-ui text-text-primary">
         “{c.fromClaimText ?? "claim"}”{" "}
         <span className="text-text-muted">({c.fromPaperTitle ?? "paper"})</span>
       </p>
-      <p className="text-[13px] text-text-secondary">
+      <p className="text-ui text-text-secondary">
         “{c.toClaimText ?? "claim"}”{" "}
         <span className="text-text-muted">({c.toPaperTitle ?? "paper"})</span>
       </p>
       {c.synthesisRationale && (
-        <p className="mt-2 text-[12px] text-text-muted">
+        <p className="mt-2 text-small text-text-muted">
           Synthesis said: {c.synthesisRationale}
         </p>
       )}
       {c.rationale && (
-        <p className="mt-2 text-[13px] leading-relaxed text-text-primary">
+        <p className="mt-2 text-ui leading-relaxed text-text-primary">
           {c.rationale}
         </p>
       )}
@@ -379,12 +379,12 @@ function ContradictionCard({ c }: { c: CriticContradiction }) {
 function FindingCard({ f }: { f: CriticFinding }) {
   return (
     <div className="rounded-xl border border-border bg-surface p-4">
-      <p className="text-[14px] font-medium leading-snug text-text-primary">
+      <p className="text-body font-medium leading-snug text-text-primary">
         {f.statement}
       </p>
       <div className="mt-2 flex flex-wrap items-center gap-2">
         {f.synthesisLabel && (
-          <span className="text-[12px] text-text-muted">
+          <span className="text-small text-text-muted">
             labeled {f.synthesisLabel}
           </span>
         )}
@@ -393,19 +393,19 @@ function FindingCard({ f }: { f: CriticFinding }) {
           {f.groundingVerdict.replace("_", " ")}
         </Badge>
         {f.confidence && (
-          <span className="text-[12px] text-text-muted">{f.confidence} confidence</span>
+          <span className="text-small text-text-muted">{f.confidence} confidence</span>
         )}
         {(f.labelVerdict !== "justified" || f.groundingVerdict !== "grounded") && (
           <SeverityBadge severity={f.severity} />
         )}
       </div>
       {f.independenceNote && (
-        <p className="mt-2 text-[12px] text-text-muted">
+        <p className="mt-2 text-small text-text-muted">
           Independence: {f.independenceNote}
         </p>
       )}
       {f.rationale && (
-        <p className="mt-2 text-[13px] leading-relaxed text-text-primary">
+        <p className="mt-2 text-ui leading-relaxed text-text-primary">
           {f.rationale}
         </p>
       )}
@@ -416,7 +416,7 @@ function FindingCard({ f }: { f: CriticFinding }) {
 function Badge({ color, children }: { color: string; children: React.ReactNode }) {
   return (
     <span
-      className="rounded-full px-2 py-0.5 text-[11px] font-medium"
+      className="rounded-full px-2 py-0.5 text-caption font-medium"
       style={{ color, backgroundColor: "var(--surface-raised)" }}
     >
       {children}
@@ -427,7 +427,7 @@ function SeverityBadge({ severity }: { severity: string | null }) {
   if (!severity) return null;
   return (
     <span
-      className="rounded-full px-2 py-0.5 text-[11px] font-medium"
+      className="rounded-full px-2 py-0.5 text-caption font-medium"
       style={{ color: severityColor(severity), backgroundColor: "var(--surface-raised)" }}
     >
       {severity} severity
@@ -436,7 +436,7 @@ function SeverityBadge({ severity }: { severity: string | null }) {
 }
 function PanelLabel({ children }: { children: React.ReactNode }) {
   return (
-    <h3 className="text-[13px] font-medium text-text-secondary">{children}</h3>
+    <h3 className="text-ui font-medium text-text-secondary">{children}</h3>
   );
 }
 function Spinner() {

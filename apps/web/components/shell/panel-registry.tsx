@@ -67,16 +67,19 @@ function WriterPanel() {
 }
 
 // The disabled placeholder: live proof of the extension path, and Phase 3's
-// visible home.
+// visible home. It gets the mirrored ink field, one of the interface's
+// artistic breathing moments.
 function FabricationPanel() {
   return (
-    <div className="rounded-xl border border-dashed border-border p-4">
-      <p className="text-[13px] font-medium text-text-primary">Fabrication</p>
-      <p className="mt-1 text-[12px] leading-relaxed text-text-muted">
-        Coming in Phase 3: the Rhino/Grasshopper plugin registers here as a panel, carrying geometry
-        handoffs from validated findings into parametric models. This entry exists now to prove the
-        panel registry's extension path.
-      </p>
+    <div className="flex h-full min-h-[240px] items-center justify-center">
+      <div className="max-w-sm px-6 text-center">
+        <p className="font-display text-display leading-tight text-ink">Fabrication</p>
+        <p className="mt-3 text-mid leading-relaxed text-ink-500">
+          Coming in Phase 3: the Rhino/Grasshopper plugin registers here as a panel, carrying geometry
+          handoffs from validated findings into parametric models. This entry exists now to prove the
+          registry's extension path.
+        </p>
+      </div>
     </div>
   );
 }

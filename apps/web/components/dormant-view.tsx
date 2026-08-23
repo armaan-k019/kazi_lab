@@ -17,7 +17,7 @@ export function DormantView({ agent }: { agent: Agent }) {
       <h2 className="text-lg font-medium text-text-secondary">
         The {agent.name} is not yet active.
       </h2>
-      <p className="max-w-md text-[15px] leading-relaxed text-text-muted">
+      <p className="max-w-md text-mid leading-relaxed text-text-muted">
         {DESCRIPTIONS[agent.id]}
       </p>
     </div>

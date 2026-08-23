@@ -133,7 +133,7 @@ export function SynthesisControl({
     <div className="mb-6">
       <div className="flex flex-wrap items-center gap-3">
         {phase === "running" ? (
-          <span className="flex items-center gap-2 text-[13px] text-text-secondary">
+          <span className="flex items-center gap-2 text-ui text-text-secondary">
             <Spinner />
             Synthesizing {libraryName}…{" "}
             <span className="text-text-muted">{word}</span>
@@ -144,14 +144,14 @@ export function SynthesisControl({
               type="button"
               onClick={run}
               disabled={!canSynthesize}
-              className="rounded-lg border border-accent/40 px-4 py-2 text-[13px] font-medium text-accent transition-colors hover:bg-accent-dim disabled:cursor-default disabled:border-border disabled:text-text-muted disabled:hover:bg-transparent"
+              className="rounded-lg border border-accent/40 px-4 py-2 text-ui font-medium text-accent transition-colors hover:bg-accent-dim disabled:cursor-default disabled:border-border disabled:text-text-muted disabled:hover:bg-transparent"
             >
               {phase === "done" || phase === "error"
                 ? "Synthesize again"
                 : "Synthesize"}
             </button>
             {!canSynthesize && (
-              <span className="text-[12px] text-text-muted">
+              <span className="text-small text-text-muted">
                 needs at least 2 papers
               </span>
             )}
@@ -159,7 +159,7 @@ export function SynthesisControl({
         )}
 
         {phase === "done" && counts && (
-          <span className="text-[13px] text-accent">
+          <span className="text-ui text-accent">
             ✓ {counts.themeCount} themes, {counts.findingCount} findings,{" "}
             {counts.relationCount} connections, {counts.openQuestionCount} open
             questions
@@ -167,11 +167,11 @@ export function SynthesisControl({
         )}
 
         {phase === "error" && error && (
-          <span className="text-[13px] text-[#b4493b]">{error}</span>
+          <span className="text-ui text-missing">{error}</span>
         )}
       </div>
 
-      <p className="mt-1.5 text-[12px] text-text-muted">
+      <p className="mt-1.5 text-small text-text-muted">
         {latestText}
         {latest && (
           <>

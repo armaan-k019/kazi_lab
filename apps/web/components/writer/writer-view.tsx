@@ -9,8 +9,8 @@ import { formatRelativeTime } from "@/lib/format";
 // proposed, and what is an honest placeholder, mirroring the upstream separation.
 function kindMarker(kind: string): { label: string; color: string } | null {
   if (kind === "computed") return { label: "COMPUTED", color: "var(--text-secondary)" };
-  if (kind === "proposed") return { label: "PROPOSED", color: "#b07a4f" };
-  if (kind === "placeholder") return { label: "NOT YET RUN", color: "#b07a4f" };
+  if (kind === "proposed") return { label: "PROPOSED", color: "var(--warm)" };
+  if (kind === "placeholder") return { label: "NOT YET RUN", color: "var(--warm)" };
   return null;
 }
 
@@ -61,7 +61,7 @@ export function WriterView() {
   return (
     <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.22, ease: "easeOut" }}>
       <h2 className="text-2xl font-semibold tracking-tight text-text-primary">Writer</h2>
-      <p className="mt-1.5 max-w-2xl text-[13px] leading-relaxed text-text-muted">
+      <p className="mt-1.5 max-w-2xl text-ui leading-relaxed text-text-muted">
         Documents a research thread end to end: the claim and its origin, the synthesis behind it,
         the computed meta-analysis, and the proposed experiment, as one grounded write-up. The Writer
         is a documentarian, not an author: every statement traces to something that already exists,
@@ -69,7 +69,7 @@ export function WriterView() {
       </p>
 
       {data && runs.length === 0 && (
-        <p className="mt-8 max-w-md text-[15px] leading-relaxed text-text-muted">
+        <p className="mt-8 max-w-md text-mid leading-relaxed text-text-muted">
           No Experimentalist runs to document yet. Run the Experimentalist first, then write the
           thread here.
         </p>
@@ -77,12 +77,12 @@ export function WriterView() {
 
       {data && runs.length > 0 && (
         <div className="mt-6 rounded-xl border border-border bg-surface p-4">
-          <p className="text-[12px] font-medium text-text-secondary">Experimentalist thread to document</p>
+          <p className="text-small font-medium text-text-secondary">Experimentalist thread to document</p>
           <div className="mt-2 flex flex-wrap items-center gap-3">
             <select
               value={selExp}
               onChange={(e) => setSelExp(e.target.value)}
-              className="max-w-xl flex-1 rounded-lg border border-border bg-surface-raised px-3 py-2 text-[13px] text-text-primary"
+              className="max-w-xl flex-1 rounded-lg border border-border bg-surface-raised px-3 py-2 text-ui text-text-primary"
             >
               {runs.map((r) => (
                 <option key={r.id} value={r.id}>
@@ -95,7 +95,7 @@ export function WriterView() {
               type="button"
               onClick={run}
               disabled={running || !selExp}
-              className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:cursor-default disabled:opacity-50"
+              className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-paper transition-opacity hover:opacity-90 disabled:cursor-default disabled:opacity-50"
             >
               {running ? "Writing…" : "Write document"}
             </button>
@@ -108,20 +108,20 @@ export function WriterView() {
               </a>
             )}
             {running && (
-              <span className="flex items-center gap-2 text-[13px] text-text-secondary">
+              <span className="flex items-center gap-2 text-ui text-text-secondary">
                 <Spinner /> assembling the thread and writing, this takes a minute…
               </span>
             )}
           </div>
-          <p className="mt-2 text-[11px] text-text-muted">A dot marks threads that already have a document.</p>
+          <p className="mt-2 text-caption text-text-muted">A dot marks threads that already have a document.</p>
         </div>
       )}
 
-      {error && <p className="mt-4 text-[13px] text-[#b4493b]">{error}</p>}
+      {error && <p className="mt-4 text-ui text-missing">{error}</p>}
 
       {doc && <DocumentView doc={doc} />}
       {data && runs.length > 0 && !doc && !running && (
-        <p className="mt-8 text-[15px] leading-relaxed text-text-muted">
+        <p className="mt-8 text-mid leading-relaxed text-text-muted">
           This thread has no document yet. Write one to see the research write-up.
         </p>
       )}
@@ -132,14 +132,14 @@ export function WriterView() {
 function DocumentView({ doc }: { doc: WriterDocument }) {
   return (
     <article className="mt-8 max-w-3xl">
-      <h1 className="text-[22px] font-semibold leading-tight tracking-tight text-text-primary">{doc.title}</h1>
-      <p className="mt-1.5 text-[12px] text-text-muted">
+      <h1 className="text-title font-semibold leading-tight tracking-tight text-text-primary">{doc.title}</h1>
+      <p className="mt-1.5 text-small text-text-muted">
         {doc.completedAt ? formatRelativeTime(doc.completedAt) : ""}
         {doc.conferencesConsidered && doc.conferencesConsidered.length > 0
           ? ` · framed for ${doc.conferencesConsidered.join(", ")}`
           : ""}
       </p>
-      {doc.notes && <p className="mt-1 text-[12px] text-[#b07a4f]">{doc.notes}</p>}
+      {doc.notes && <p className="mt-1 text-small text-warm">{doc.notes}</p>}
 
       <div className="mt-6 space-y-7">
         {doc.sections.map((s) => {
@@ -148,20 +148,20 @@ function DocumentView({ doc }: { doc: WriterDocument }) {
           return (
             <section key={s.key}>
               <div className="flex flex-wrap items-center gap-2">
-                <h2 className="text-[15px] font-semibold tracking-tight text-text-primary">{s.heading}</h2>
+                <h2 className="text-mid font-semibold tracking-tight text-text-primary">{s.heading}</h2>
                 {marker && (
                   <span
-                    className="rounded-full px-2 py-0.5 text-[10px] font-semibold tracking-wide"
+                    className="rounded-full px-2 py-0.5 text-micro font-semibold tracking-wide"
                     style={{ color: marker.color, backgroundColor: "var(--surface-raised)" }}
                   >
                     {marker.label}
                   </span>
                 )}
                 {provCount > 0 && (
-                  <span className="text-[11px] text-text-muted">{provCount} source{provCount === 1 ? "" : "s"}</span>
+                  <span className="text-caption text-text-muted">{provCount} source{provCount === 1 ? "" : "s"}</span>
                 )}
               </div>
-              <p className="mt-2 whitespace-pre-wrap text-[14px] leading-relaxed text-text-primary">{s.body}</p>
+              <p className="mt-2 whitespace-pre-wrap text-body leading-relaxed text-text-primary">{s.body}</p>
             </section>
           );
         })}

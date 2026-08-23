@@ -52,7 +52,7 @@ export function LibrarySwitcher({
               type="button"
               onClick={() => onSelect(lib.id)}
               className={[
-                "rounded-full border px-3 py-1.5 text-[13px] transition-colors",
+                "rounded-full border px-3 py-1.5 text-ui transition-colors",
                 isActive
                   ? "border-accent/30 bg-accent-dim text-accent"
                   : "border-border text-text-secondary hover:bg-surface-raised hover:text-text-primary",
@@ -77,7 +77,7 @@ export function LibrarySwitcher({
             setConfirmDeleteId(null);
             setError(null);
           }}
-          className="rounded-full border border-dashed border-border px-3 py-1.5 text-[13px] text-text-muted transition-colors hover:border-accent/40 hover:text-accent"
+          className="rounded-full border border-dashed border-border px-3 py-1.5 text-ui text-text-muted transition-colors hover:border-accent/40 hover:text-accent"
         >
           + new library
         </button>
@@ -98,7 +98,7 @@ export function LibrarySwitcher({
                     setConfirmDeleteId(null);
                     setError(null);
                   }}
-                  className="text-[12px] text-text-muted transition-colors hover:text-accent"
+                  className="text-small text-text-muted transition-colors hover:text-accent"
                 >
                   edit library
                 </button>
@@ -111,7 +111,7 @@ export function LibrarySwitcher({
                       setCreating(false);
                       setError(null);
                     }}
-                    className="text-[12px] text-text-muted transition-colors hover:text-[#b4493b]"
+                    className="text-small text-text-muted transition-colors hover:text-missing"
                   >
                     delete library
                   </button>
@@ -140,7 +140,7 @@ export function LibrarySwitcher({
 
       {/* Inline delete confirmation */}
       {pendingDelete && (
-        <div className="mt-3 flex flex-wrap items-center gap-3 rounded-lg border border-border bg-surface p-3 text-[13px]">
+        <div className="mt-3 flex flex-wrap items-center gap-3 rounded-lg border border-border bg-surface p-3 text-ui">
           <span className="text-text-secondary">
             Delete library &ldquo;{pendingDelete.name}&rdquo;? Its papers stay in
             the corpus.
@@ -149,7 +149,7 @@ export function LibrarySwitcher({
             type="button"
             disabled={busy}
             onClick={() => confirmDelete(pendingDelete.id)}
-            className="rounded-md border border-[#b4493b]/30 px-3 py-1 font-medium text-[#b4493b] transition-colors hover:bg-[#b4493b]/8 disabled:opacity-40"
+            className="rounded-md border border-missing/30 px-3 py-1 font-medium text-missing transition-colors hover:bg-missing/10 disabled:opacity-40"
           >
             Delete
           </button>
@@ -163,7 +163,7 @@ export function LibrarySwitcher({
         </div>
       )}
 
-      {error && <p className="mt-2 text-[13px] text-text-secondary">{error}</p>}
+      {error && <p className="mt-2 text-ui text-text-secondary">{error}</p>}
     </div>
   );
 }

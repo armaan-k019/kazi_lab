@@ -62,7 +62,7 @@ export function PaperDetail({
       <button
         type="button"
         onClick={onBack}
-        className="mb-8 text-[13px] text-text-secondary transition-colors hover:text-accent"
+        className="mb-8 text-ui text-text-secondary transition-colors hover:text-accent"
       >
         ← Corpus
       </button>
@@ -70,22 +70,22 @@ export function PaperDetail({
       {error && <p className="text-sm text-text-secondary">{error}</p>}
 
       {!data && !error && (
-        <p className="text-[13px] text-text-muted">Loading…</p>
+        <p className="text-ui text-text-muted">Loading…</p>
       )}
 
       {data && (
         <article className="max-w-3xl">
-          <h2 className="text-[28px] font-semibold leading-tight tracking-tight text-text-primary">
+          <h2 className="text-headline font-semibold leading-tight tracking-tight text-text-primary">
             {data.paper.title}
           </h2>
 
-          <p className="mt-3 text-[15px] leading-relaxed text-text-secondary">
+          <p className="mt-3 text-mid leading-relaxed text-text-secondary">
             {data.authors.length > 0
               ? data.authors.map((a) => a.name).join(", ")
               : "unknown authors"}
           </p>
 
-          <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-1.5 text-[13px] text-text-muted">
+          <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-1.5 text-ui text-text-muted">
             {data.paper.arxivId && (
               <span className="font-mono">arXiv:{data.paper.arxivId}</span>
             )}
@@ -105,7 +105,7 @@ export function PaperDetail({
           {/* External identity (OpenAlex), only when confidently matched. */}
           {data.external &&
             (data.external.citedByCount != null || data.external.doi) && (
-              <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[13px] text-text-muted">
+              <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-ui text-text-muted">
                 {data.external.citedByCount != null && (
                   <span>
                     Cited {data.external.citedByCount.toLocaleString()} times
@@ -194,7 +194,7 @@ export function PaperDetail({
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
-    <h3 className="text-[13px] font-medium text-text-secondary">{children}</h3>
+    <h3 className="text-ui font-medium text-text-secondary">{children}</h3>
   );
 }
 
@@ -203,7 +203,7 @@ function Prose({ label, value }: { label: string; value: string | null }) {
   return (
     <section>
       <SectionLabel>{label}</SectionLabel>
-      <p className="mt-2 text-[15px] leading-[1.65] text-text-primary">
+      <p className="mt-2 text-mid leading-[1.65] text-text-primary">
         {value}
       </p>
     </section>
@@ -212,7 +212,7 @@ function Prose({ label, value }: { label: string; value: string | null }) {
 
 function Chip({ children }: { children: React.ReactNode }) {
   return (
-    <span className="rounded-full bg-surface-raised px-3 py-1 text-[13px] text-text-secondary">
+    <span className="rounded-full bg-surface-raised px-3 py-1 text-ui text-text-secondary">
       {children}
     </span>
   );
@@ -221,14 +221,14 @@ function Chip({ children }: { children: React.ReactNode }) {
 function ClaimCard({ claim }: { claim: Claim }) {
   return (
     <div className="rounded-xl border border-border bg-surface p-4">
-      <p className="text-[15px] leading-[1.6] text-text-primary">{claim.text}</p>
+      <p className="text-mid leading-[1.6] text-text-primary">{claim.text}</p>
       {claim.sourcePassage && (
-        <p className="mt-3 border-l-2 border-border-strong pl-3 text-[13px] leading-relaxed text-text-muted">
+        <p className="mt-3 border-l-2 border-border-strong pl-3 text-ui leading-relaxed text-text-muted">
           {claim.sourcePassage}
         </p>
       )}
       {claim.confidence && (
-        <span className="mt-3 inline-block rounded-full bg-accent-dim px-2.5 py-1 text-[12px] font-medium text-accent">
+        <span className="mt-3 inline-block rounded-full bg-accent-dim px-2.5 py-1 text-small font-medium text-accent">
           {claim.confidence}
         </span>
       )}
@@ -277,7 +277,7 @@ function ExploreSection({
       <button
         type="button"
         onClick={expand}
-        className="text-[13px] font-medium text-accent transition-opacity hover:opacity-80"
+        className="text-ui font-medium text-accent transition-opacity hover:opacity-80"
       >
         {open ? "Explore ▾" : "Explore references, citations, and author works ▸"}
       </button>
@@ -285,13 +285,13 @@ function ExploreSection({
       {open && (
         <div className="mt-5">
           {loading && (
-            <p className="flex items-center gap-2 text-[13px] text-text-secondary">
+            <p className="flex items-center gap-2 text-ui text-text-secondary">
               <Spinner /> loading from OpenAlex…
             </p>
           )}
-          {error && <p className="text-[13px] text-[#b4493b]">{error}</p>}
+          {error && <p className="text-ui text-missing">{error}</p>}
           {ctx && !ctx.available && (
-            <p className="text-[13px] text-text-muted">
+            <p className="text-ui text-text-muted">
               External context not available (paper not found in OpenAlex).
             </p>
           )}
@@ -301,7 +301,7 @@ function ExploreSection({
                 <SectionLabel>Authors</SectionLabel>
                 <div className="mt-2 flex flex-wrap gap-2">
                   {ctx.authors.length === 0 && (
-                    <span className="text-[13px] text-text-muted">
+                    <span className="text-ui text-text-muted">
                       No author records.
                     </span>
                   )}
@@ -312,9 +312,9 @@ function ExploreSection({
                       onClick={() =>
                         setAuthor(author?.id === a.id ? null : a)
                       }
-                      className={`rounded-full px-2.5 py-1 text-[12px] transition-opacity hover:opacity-80 ${
+                      className={`rounded-full px-2.5 py-1 text-small transition-opacity hover:opacity-80 ${
                         author?.id === a.id
-                          ? "bg-accent text-white"
+                          ? "bg-accent text-paper"
                           : "bg-accent-dim text-accent"
                       }`}
                     >
@@ -398,15 +398,15 @@ function AuthorWorksPanel({
 
   return (
     <div className="mt-4 rounded-xl border border-border bg-surface p-4">
-      <p className="text-[13px] text-text-secondary">
+      <p className="text-ui text-text-secondary">
         Top works by {author.name}
       </p>
       {loading && (
-        <p className="mt-2 flex items-center gap-2 text-[13px] text-text-muted">
+        <p className="mt-2 flex items-center gap-2 text-ui text-text-muted">
           <Spinner /> loading…
         </p>
       )}
-      {error && <p className="mt-2 text-[13px] text-[#b4493b]">{error}</p>}
+      {error && <p className="mt-2 text-ui text-missing">{error}</p>}
       {works && (
         <div className="mt-3 space-y-2">
           {works.map((c) => (
@@ -441,7 +441,7 @@ function CandidateList({
     <div>
       <SectionLabel>{label}</SectionLabel>
       {candidates.length === 0 ? (
-        <p className="mt-2 text-[13px] text-text-muted">None found.</p>
+        <p className="mt-2 text-ui text-text-muted">None found.</p>
       ) : (
         <div className="mt-3 space-y-2">
           {candidates.map((c) => (

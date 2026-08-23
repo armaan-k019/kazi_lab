@@ -42,7 +42,7 @@ export function TabBar({ active, onSelect }: Props) {
                 {agent.name}
               </span>
             </span>
-            <span className="mt-1 pl-[18px] text-[12px] text-text-muted">
+            <span className="mt-1 pl-[18px] text-small text-text-muted">
               {agent.active ? agent.role : `${agent.role}, dormant`}
             </span>
 
@@ -113,7 +113,7 @@ function LabTab({
           {label}
         </span>
       </span>
-      <span className="mt-1 pl-[18px] text-[12px] text-text-muted">{subtitle}</span>
+      <span className="mt-1 pl-[18px] text-small text-text-muted">{subtitle}</span>
 
       {active && (
         <motion.span

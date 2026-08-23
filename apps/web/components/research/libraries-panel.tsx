@@ -72,54 +72,54 @@ export function LibrariesPanel() {
         <button
           type="button"
           onClick={() => setCreating((v) => !v)}
-          className="rounded-lg border border-border px-3 py-1.5 text-[13px] font-medium text-text-secondary transition-colors hover:border-accent/40 hover:text-accent"
+          className="rounded-(--radius-control) border border-hairline-strong px-3 py-1.5 text-ui font-medium text-ink-600 transition-colors duration-(--motion-disclose) hover:border-green hover:text-green-deep"
         >
           {creating ? "Cancel" : "New library"}
         </button>
       </div>
       {creating && (
-        <div className="space-y-2 rounded-xl border border-border bg-surface-raised p-3">
+        <div className="space-y-2 border-l-2 border-hairline py-1 pl-3">
           <input
             type="text"
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="library name"
-            className="w-full rounded border border-border bg-surface px-2 py-1 text-[13px] text-text-primary outline-none focus:border-accent/50"
+            className="w-full rounded-(--radius-control) border border-hairline bg-paper px-2 py-1 text-ui text-ink outline-none focus:border-green"
           />
           <input
             type="text"
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             placeholder="description (optional)"
-            className="w-full rounded border border-border bg-surface px-2 py-1 text-[13px] text-text-primary outline-none focus:border-accent/50"
+            className="w-full rounded-(--radius-control) border border-hairline bg-paper px-2 py-1 text-ui text-ink outline-none focus:border-green"
           />
-          <button type="button" onClick={() => void create()} disabled={busy || !name.trim()} className="rounded bg-accent px-3 py-1 text-[12px] font-medium text-white disabled:opacity-50">
+          <button type="button" onClick={() => void create()} disabled={busy || !name.trim()} className="rounded-(--radius-control) bg-green-deep px-3 py-1 text-small font-medium text-paper disabled:opacity-50">
             Create
           </button>
         </div>
       )}
-      {error && <p className="text-[12px] text-[#b4493b]">{error}</p>}
+      {error && <p className="text-small text-missing">{error}</p>}
 
-      <div className="space-y-2">
+      <div className="divide-y divide-hairline">
         {libs.map((l) => {
           const selected = l.id === selectedLibraryId;
           return (
-            <div key={l.id} className={`rounded-xl border bg-surface p-3 transition-colors ${selected ? "border-accent/60" : "border-border hover:border-accent/30"}`}>
+            <div key={l.id} className={`py-3 pl-3 transition-colors duration-(--motion-disclose) first:pt-0 ${selected ? "border-l-2 border-green" : "border-l-2 border-transparent"}`}>
               {editingId === l.id ? (
                 <div className="flex items-center gap-2">
                   <input
                     type="text"
                     value={editName}
                     onChange={(e) => setEditName(e.target.value)}
-                    className="flex-1 rounded border border-border bg-surface-raised px-2 py-1 text-[13px] text-text-primary outline-none focus:border-accent/50"
+                    className="flex-1 rounded-(--radius-control) border border-hairline bg-paper px-2 py-1 text-ui text-ink outline-none focus:border-green"
                   />
-                  <button type="button" onClick={() => void rename(l.id)} disabled={busy} className="text-[11px] text-accent">save</button>
-                  <button type="button" onClick={() => setEditingId(null)} className="text-[11px] text-text-muted">cancel</button>
+                  <button type="button" onClick={() => void rename(l.id)} disabled={busy} className="text-caption text-green-deep">save</button>
+                  <button type="button" onClick={() => setEditingId(null)} className="text-caption text-ink-500">cancel</button>
                 </div>
               ) : (
                 <button type="button" onClick={() => setSelectedLibraryId(l.id)} className="block w-full text-left">
                   <div className="flex items-center gap-2">
-                    <p className="text-[13px] font-medium text-text-primary">{l.name}</p>
+                    <p className="font-display text-lead leading-tight text-ink">{l.name}</p>
                     <span
                       role="button"
                       tabIndex={0}
@@ -135,12 +135,12 @@ export function LibrariesPanel() {
                           setEditName(l.name);
                         }
                       }}
-                      className="ml-auto cursor-pointer text-[11px] text-text-muted hover:text-accent"
+                      className="ml-auto cursor-pointer text-caption text-ink-500 hover:text-green-deep"
                     >
                       edit
                     </span>
                   </div>
-                  <p className="mt-1 text-[11px] text-text-muted">
+                  <p className="mt-1 text-caption text-ink-500">
                     {l.stages.papers.count} papers · synthesis{" "}
                     {l.stages.synthesis.at ? formatRelativeTime(l.stages.synthesis.at) : l.stages.synthesis.state} ·{" "}
                     {l.stages.metrics.rows} metric rows · critic {l.stages.critic.state === "done" ? "current" : l.stages.critic.state}
@@ -150,7 +150,7 @@ export function LibrariesPanel() {
             </div>
           );
         })}
-        {libs.length === 0 && <p className="text-[13px] text-text-muted">No libraries yet.</p>}
+        {libs.length === 0 && <p className="text-ui text-ink-500">No libraries yet.</p>}
       </div>
     </div>
   );

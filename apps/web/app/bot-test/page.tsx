@@ -35,7 +35,7 @@ export default function BotTestPage() {
             key={s}
             type="button"
             onClick={() => setState(s)}
-            className={`rounded-full border px-3 py-1 text-[13px] transition-colors ${
+            className={`rounded-full border px-3 py-1 text-ui transition-colors ${
               state === s ? "border-accent/50 bg-accent-dim text-accent" : "border-border text-text-secondary hover:border-accent/30 hover:text-accent"
             }`}
           >
@@ -45,7 +45,7 @@ export default function BotTestPage() {
       </div>
 
       <div className="w-full space-y-4 rounded-xl border border-border bg-surface p-4">
-        <p className="text-[11px] font-medium uppercase tracking-wide text-text-muted">tuning (live; bake keepers into BOT_DEFAULTS)</p>
+        <p className="text-caption font-medium uppercase tracking-wide text-text-muted">tuning (live; bake keepers into BOT_DEFAULTS)</p>
 
         <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
           <Toggle
@@ -66,16 +66,16 @@ export default function BotTestPage() {
             value={tuning.materialStyle}
             onChange={(v) => set("materialStyle", v as BotTuning["materialStyle"])}
           />
-          <label className="flex items-center gap-1.5 text-[12px] text-text-secondary">
+          <label className="flex items-center gap-1.5 text-small text-text-secondary">
             <input type="checkbox" checked={tuning.cheeks} onChange={(e) => set("cheeks", e.target.checked)} /> cheeks
           </label>
-          <label className="flex items-center gap-1.5 text-[12px] text-text-secondary">
+          <label className="flex items-center gap-1.5 text-small text-text-secondary">
             <input type="checkbox" checked={tuning.waddle} onChange={(e) => set("waddle", e.target.checked)} /> waddle
           </label>
-          <label className="flex items-center gap-1.5 text-[12px] text-text-secondary">
+          <label className="flex items-center gap-1.5 text-small text-text-secondary">
             body green
             <input type="color" value={tuning.bodyGreen} onChange={(e) => set("bodyGreen", e.target.value)} className="h-6 w-10 cursor-pointer rounded border border-border bg-transparent" />
-            <span className="font-mono text-[10px] text-text-muted">{tuning.bodyGreen}</span>
+            <span className="font-mono text-micro text-text-muted">{tuning.bodyGreen}</span>
           </label>
         </div>
 
@@ -93,14 +93,14 @@ export default function BotTestPage() {
 
         {antics.length > 0 && (
           <div>
-            <p className="text-[11px] font-medium uppercase tracking-wide text-text-muted">fire an antic (plays immediately)</p>
+            <p className="text-caption font-medium uppercase tracking-wide text-text-muted">fire an antic (plays immediately)</p>
             <div className="mt-2 flex flex-wrap gap-1.5">
               {antics.map((name) => (
                 <button
                   key={name}
                   type="button"
                   onClick={() => botApiRef.current?.fireAntic(name)}
-                  className="rounded-full border border-border px-2.5 py-0.5 text-[11px] text-text-secondary transition-colors hover:border-accent/40 hover:text-accent"
+                  className="rounded-full border border-border px-2.5 py-0.5 text-caption text-text-secondary transition-colors hover:border-accent/40 hover:text-accent"
                 >
                   {name.replace(/_/g, " ")}
                 </button>
@@ -109,12 +109,12 @@ export default function BotTestPage() {
           </div>
         )}
 
-        <button type="button" onClick={() => setTuning({ ...BOT_DEFAULTS })} className="rounded border border-border px-2 py-0.5 text-[11px] text-text-secondary transition-colors hover:border-accent/40 hover:text-accent">
+        <button type="button" onClick={() => setTuning({ ...BOT_DEFAULTS })} className="rounded border border-border px-2 py-0.5 text-caption text-text-secondary transition-colors hover:border-accent/40 hover:text-accent">
           reset to defaults
         </button>
       </div>
 
-      <p className="max-w-md text-center text-[12px] leading-relaxed text-text-muted">
+      <p className="max-w-md text-center text-small leading-relaxed text-text-muted">
         what to judge: the silhouette (plush egg, not a ball), the face charm (big low-set eyes, highlight
         dots), each state's feel (idle breathes and blinks, thinking tilts with dots, loading bounces with
         squash, success jumps with sparkles, error deflates under a little cloud), and which material and
@@ -126,7 +126,7 @@ export default function BotTestPage() {
 
 function Toggle({ label, options, value, onChange }: { label: string; options: string[]; value: string; onChange: (v: string) => void }) {
   return (
-    <span className="flex items-center gap-1.5 text-[12px] text-text-secondary">
+    <span className="flex items-center gap-1.5 text-small text-text-secondary">
       {label}
       <span className="flex overflow-hidden rounded-full border border-border">
         {options.map((o) => (
@@ -134,7 +134,7 @@ function Toggle({ label, options, value, onChange }: { label: string; options: s
             key={o}
             type="button"
             onClick={() => onChange(o)}
-            className={`px-2 py-0.5 text-[11px] transition-colors ${value === o ? "bg-accent-dim text-accent" : "text-text-secondary hover:text-accent"}`}
+            className={`px-2 py-0.5 text-caption transition-colors ${value === o ? "bg-accent-dim text-accent" : "text-text-secondary hover:text-accent"}`}
           >
             {o}
           </button>
@@ -146,10 +146,10 @@ function Toggle({ label, options, value, onChange }: { label: string; options: s
 
 function Slider({ label, min, max, step, value, onChange }: { label: string; min: number; max: number; step: number; value: number; onChange: (v: number) => void }) {
   return (
-    <label className="flex items-center gap-2 text-[12px] text-text-secondary">
+    <label className="flex items-center gap-2 text-small text-text-secondary">
       <span className="w-32 shrink-0">{label}</span>
       <input type="range" min={min} max={max} step={step} value={value} onChange={(e) => onChange(Number(e.target.value))} className="h-1 flex-1" />
-      <span className="w-10 shrink-0 text-right font-mono text-[10px] text-text-muted">{value.toFixed(2)}</span>
+      <span className="w-10 shrink-0 text-right font-mono text-micro text-text-muted">{value.toFixed(2)}</span>
     </label>
   );
 }

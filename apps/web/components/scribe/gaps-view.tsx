@@ -56,7 +56,7 @@ export function GapsView({
       <button
         type="button"
         onClick={onBack}
-        className="mb-6 text-[13px] text-text-secondary transition-colors hover:text-accent"
+        className="mb-6 text-ui text-text-secondary transition-colors hover:text-accent"
       >
         ← Corpus
       </button>
@@ -64,23 +64,23 @@ export function GapsView({
       <h2 className="text-2xl font-semibold tracking-tight text-text-primary">
         What am I missing · {libraryName}
       </h2>
-      <p className="mt-1.5 text-[12px] text-text-muted">
+      <p className="mt-1.5 text-small text-text-muted">
         Papers not in this library that connect to several of its papers, either
         as shared references or as works citing multiple members.
       </p>
 
       <div className="mt-6">
         {loading && (
-          <p className="flex items-center gap-2 text-[13px] text-text-secondary">
+          <p className="flex items-center gap-2 text-ui text-text-secondary">
             <Spinner /> scanning the citation graph…
           </p>
         )}
-        {error && <p className="text-[13px] text-[#b4493b]">{error}</p>}
+        {error && <p className="text-ui text-missing">{error}</p>}
         {result && !result.available && (
-          <p className="text-[13px] text-text-muted">{result.reason}</p>
+          <p className="text-ui text-text-muted">{result.reason}</p>
         )}
         {result && result.available && result.candidates.length === 0 && (
-          <p className="text-[13px] text-text-muted">
+          <p className="text-ui text-text-muted">
             No shared references or common citers found across this
             library&rsquo;s papers.
           </p>

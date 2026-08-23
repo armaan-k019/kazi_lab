@@ -17,12 +17,12 @@ const KIND_LABEL: Record<string, string> = {
 };
 
 function statusColor(status: string): string {
-  if (status === "completed") return "#6fb08a";
-  if (status === "failed") return "#b4493b";
-  if (status === "executing") return "#7da2d9";
+  if (status === "completed") return "var(--green-deep)";
+  if (status === "failed") return "var(--missing)";
+  if (status === "executing") return "var(--green-deep)";
   if (status === "approved") return "var(--accent)";
   if (status === "deferred" || status === "rejected") return "var(--text-muted)";
-  return "#b07a4f"; // queued: awaiting a human decision
+  return "var(--warm)"; // queued: awaiting a human decision
 }
 
 export function SchedulerView({ onBotState }: { onBotState?: (s: SchedulerBotState) => void }) {
@@ -126,14 +126,14 @@ export function SchedulerView({ onBotState }: { onBotState?: (s: SchedulerBotSta
   return (
     <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.22, ease: "easeOut" }}>
       <h2 className="text-2xl font-semibold tracking-tight text-text-primary">Scheduler</h2>
-      <p className="mt-1.5 max-w-2xl text-[13px] leading-relaxed text-text-muted">
+      <p className="mt-1.5 max-w-2xl text-ui leading-relaxed text-text-muted">
         The lab detecting what to do. Deterministic detection over the corpus state queues actionable
         tasks with conservative cost estimates; you approve every consequential move before anything
         runs. Detection asserts nothing and calls no model.
       </p>
 
       <div className="mt-5 flex flex-wrap items-center gap-3">
-        <button type="button" onClick={runDetection} disabled={busy !== null} className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:cursor-default disabled:opacity-50">
+        <button type="button" onClick={runDetection} disabled={busy !== null} className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-paper transition-opacity hover:opacity-90 disabled:cursor-default disabled:opacity-50">
           {busy === "detect" ? "Detecting…" : "Run detection now"}
         </button>
         <button type="button" onClick={executeApproved} disabled={busy !== null || approved.length === 0} className="rounded-lg border border-border px-4 py-2 text-sm font-medium text-text-secondary transition-colors hover:border-accent/40 hover:text-accent disabled:cursor-default disabled:opacity-50">
@@ -141,21 +141,21 @@ export function SchedulerView({ onBotState }: { onBotState?: (s: SchedulerBotSta
         </button>
         {queued.length > 0 && (
           <>
-            <button type="button" onClick={() => act("approve", undefined, true)} disabled={busy !== null} className="rounded-lg border border-border px-3 py-2 text-[13px] text-text-secondary transition-colors hover:border-accent/40 hover:text-accent disabled:opacity-50">
+            <button type="button" onClick={() => act("approve", undefined, true)} disabled={busy !== null} className="rounded-lg border border-border px-3 py-2 text-ui text-text-secondary transition-colors hover:border-accent/40 hover:text-accent disabled:opacity-50">
               Approve all
             </button>
-            <button type="button" onClick={() => act("defer", undefined, true)} disabled={busy !== null} className="rounded-lg border border-border px-3 py-2 text-[13px] text-text-secondary transition-colors hover:border-accent/40 hover:text-accent disabled:opacity-50">
+            <button type="button" onClick={() => act("defer", undefined, true)} disabled={busy !== null} className="rounded-lg border border-border px-3 py-2 text-ui text-text-secondary transition-colors hover:border-accent/40 hover:text-accent disabled:opacity-50">
               Defer all
             </button>
           </>
         )}
-        {busy && <span className="flex items-center gap-2 text-[13px] text-text-secondary"><Spinner /> {busy === "execute" ? "running approved tasks, this can take a while…" : "detecting…"}</span>}
+        {busy && <span className="flex items-center gap-2 text-ui text-text-secondary"><Spinner /> {busy === "execute" ? "running approved tasks, this can take a while…" : "detecting…"}</span>}
       </div>
 
-      {error && <p className="mt-4 text-[13px] text-[#b4493b]">{error}</p>}
+      {error && <p className="mt-4 text-ui text-missing">{error}</p>}
 
       {data && !run && (
-        <p className="mt-8 max-w-md text-[15px] leading-relaxed text-text-muted">
+        <p className="mt-8 max-w-md text-mid leading-relaxed text-text-muted">
           No detection pass yet. Run detection to see what the lab thinks needs doing.
         </p>
       )}
@@ -165,15 +165,15 @@ export function SchedulerView({ onBotState }: { onBotState?: (s: SchedulerBotSta
           {/* Detection status. */}
           <div className="mt-6 rounded-xl border border-border bg-surface p-4">
             <div className="flex flex-wrap items-center gap-2">
-              <span className="rounded-full px-2 py-0.5 text-[11px] font-medium" style={{ color: statusColor(run.status === "awaiting_approval" ? "queued" : run.status), backgroundColor: "var(--surface-raised)" }}>
+              <span className="rounded-full px-2 py-0.5 text-caption font-medium" style={{ color: statusColor(run.status === "awaiting_approval" ? "queued" : run.status), backgroundColor: "var(--surface-raised)" }}>
                 {run.status.replace("_", " ")}
               </span>
-              <span className="text-[12px] text-text-muted">
+              <span className="text-small text-text-muted">
                 last detection {formatRelativeTime(run.createdAt)} · {run.tasksQueued} task{run.tasksQueued === 1 ? "" : "s"} queued · ~${totalCost.toFixed(2)} estimated (upper bound)
               </span>
             </div>
             {stats && (
-              <p className="mt-2 text-[12px] leading-relaxed text-text-secondary">
+              <p className="mt-2 text-small leading-relaxed text-text-secondary">
                 {stats.totalLibraries} libraries ({stats.synthesizedLibraries} synthesized, {stats.librariesWithMetrics} with metrics) ·
                 stale items: {stats.synthesisStale} synthesis, {stats.metricsMissing} metrics
                 {stats.crossDomainMissing > 0 ? ", cross-domain aging" : ""}
@@ -181,21 +181,21 @@ export function SchedulerView({ onBotState }: { onBotState?: (s: SchedulerBotSta
                 {stats.apiFailures24h > 0 ? ` · ${stats.apiFailures24h} agent failure${stats.apiFailures24h === 1 ? "" : "s"} in 24h` : ""}
               </p>
             )}
-            {run.notes && <p className="mt-1 text-[12px] text-text-muted">{run.notes}</p>}
+            {run.notes && <p className="mt-1 text-small text-text-muted">{run.notes}</p>}
             <div className="mt-2">
-              <button type="button" onClick={() => setShowDiagnostics((s) => !s)} className="text-[11px] text-text-muted underline-offset-2 hover:text-text-secondary hover:underline">
+              <button type="button" onClick={() => setShowDiagnostics((s) => !s)} className="text-caption text-text-muted underline-offset-2 hover:text-text-secondary hover:underline">
                 {showDiagnostics ? "hide diagnostics" : `view diagnostics (${data?.diagnostics.length ?? 0})`}
               </button>
               {showDiagnostics && (
                 <ul className="mt-2 space-y-1 border-t border-border pt-2">
                   {(data?.diagnostics ?? []).map((d) => (
-                    <li key={d.id} className="font-mono text-[11px] leading-relaxed text-text-secondary">
-                      <span className="text-[#b07a4f]">{d.kind}</span>
+                    <li key={d.id} className="font-mono text-caption leading-relaxed text-text-secondary">
+                      <span className="text-warm">{d.kind}</span>
                       {d.libraryName && <span className="text-text-primary"> {d.libraryName}</span>}
                       <span className="text-text-muted"> · {JSON.stringify(d.details)}</span>
                     </li>
                   ))}
-                  {(data?.diagnostics.length ?? 0) === 0 && <li className="text-[11px] text-text-muted">no diagnostics on this run</li>}
+                  {(data?.diagnostics.length ?? 0) === 0 && <li className="text-caption text-text-muted">no diagnostics on this run</li>}
                 </ul>
               )}
             </div>
@@ -203,7 +203,7 @@ export function SchedulerView({ onBotState }: { onBotState?: (s: SchedulerBotSta
 
           {/* Task queue. */}
           <div className="mt-4 space-y-2">
-            {tasks.length === 0 && <p className="text-[13px] text-text-muted">Nothing to do. The corpus is current.</p>}
+            {tasks.length === 0 && <p className="text-ui text-text-muted">Nothing to do. The corpus is current.</p>}
             {tasks.map((t) => (
               <TaskRow key={t.id} task={t} busy={busy !== null} onAct={(a) => act(a, t.id)} />
             ))}
@@ -212,17 +212,17 @@ export function SchedulerView({ onBotState }: { onBotState?: (s: SchedulerBotSta
           {/* Execution log. */}
           {finished.length > 0 && (
             <div className="mt-6">
-              <h3 className="text-[13px] font-semibold uppercase tracking-wide text-text-secondary">Execution log</h3>
+              <h3 className="text-ui font-semibold uppercase tracking-wide text-text-secondary">Execution log</h3>
               <div className="mt-2 space-y-2">
                 {finished.map((t) => (
                   <div key={t.id} className="rounded-lg border border-border bg-surface p-3">
-                    <p className="text-[12px] text-text-primary">
+                    <p className="text-small text-text-primary">
                       <span style={{ color: statusColor(t.status) }}>[{t.status}]</span> {KIND_LABEL[t.kind] ?? t.kind} {t.scopeNames.join(", ")}
                       {typeof t.commandResult?.elapsedMs === "number" && <span className="text-text-muted"> · {Math.round(t.commandResult.elapsedMs / 1000)}s</span>}
                     </p>
-                    {t.commandResult?.error && <p className="mt-1 font-mono text-[11px] leading-relaxed text-[#b4493b]">{t.commandResult.error}</p>}
+                    {t.commandResult?.error && <p className="mt-1 font-mono text-caption leading-relaxed text-missing">{t.commandResult.error}</p>}
                     {t.commandResult?.summary && (
-                      <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-text-muted">{t.commandResult.summary}</pre>
+                      <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap font-mono text-caption leading-relaxed text-text-muted">{t.commandResult.summary}</pre>
                     )}
                   </div>
                 ))}
@@ -240,29 +240,29 @@ function TaskRow({ task, busy, onAct }: { task: SchedulerTaskView; busy: boolean
   return (
     <div className="rounded-xl border border-border bg-surface p-3">
       <div className="flex flex-wrap items-center gap-2">
-        <span className="rounded-full px-2 py-0.5 text-[11px] font-medium" style={{ color: statusColor(task.status), backgroundColor: "var(--surface-raised)" }}>
+        <span className="rounded-full px-2 py-0.5 text-caption font-medium" style={{ color: statusColor(task.status), backgroundColor: "var(--surface-raised)" }}>
           {task.status}
         </span>
-        <span className="text-[13px] font-medium text-text-primary">{KIND_LABEL[task.kind] ?? task.kind}</span>
-        {task.scopeNames.length > 0 && <span className="text-[12px] text-text-secondary">{task.scopeNames.join(", ")}</span>}
-        <span className="font-mono text-[11px] text-text-muted">p{task.priority} · ~${task.costEstimateUsd.toFixed(2)} · ~{Math.round(task.costEstimateTokens / 1000)}k tok</span>
-        {!task.approvalRequired && <span className="text-[11px] text-text-muted">auto-approved</span>}
+        <span className="text-ui font-medium text-text-primary">{KIND_LABEL[task.kind] ?? task.kind}</span>
+        {task.scopeNames.length > 0 && <span className="text-small text-text-secondary">{task.scopeNames.join(", ")}</span>}
+        <span className="font-mono text-caption text-text-muted">p{task.priority} · ~${task.costEstimateUsd.toFixed(2)} · ~{Math.round(task.costEstimateTokens / 1000)}k tok</span>
+        {!task.approvalRequired && <span className="text-caption text-text-muted">auto-approved</span>}
         {task.status === "queued" && (
           <span className="ml-auto flex gap-1.5">
-            <button type="button" disabled={busy} onClick={() => onAct("approve")} className="rounded border border-accent/40 px-2 py-0.5 text-[11px] text-accent transition-colors hover:bg-accent-dim disabled:opacity-50">
+            <button type="button" disabled={busy} onClick={() => onAct("approve")} className="rounded border border-accent/40 px-2 py-0.5 text-caption text-accent transition-colors hover:bg-accent-dim disabled:opacity-50">
               Approve
             </button>
-            <button type="button" disabled={busy} onClick={() => onAct("defer")} className="rounded border border-border px-2 py-0.5 text-[11px] text-text-secondary transition-colors hover:border-accent/30 disabled:opacity-50">
+            <button type="button" disabled={busy} onClick={() => onAct("defer")} className="rounded border border-border px-2 py-0.5 text-caption text-text-secondary transition-colors hover:border-accent/30 disabled:opacity-50">
               Defer
             </button>
-            <button type="button" disabled={busy} onClick={() => onAct("reject")} className="rounded border border-border px-2 py-0.5 text-[11px] text-text-secondary transition-colors hover:border-[#b4493b]/50 hover:text-[#b4493b] disabled:opacity-50">
+            <button type="button" disabled={busy} onClick={() => onAct("reject")} className="rounded border border-border px-2 py-0.5 text-caption text-text-secondary transition-colors hover:border-missing/50 hover:text-missing disabled:opacity-50">
               Reject
             </button>
           </span>
         )}
       </div>
-      {reason && <p className="mt-1 text-[12px] leading-relaxed text-text-muted">{reason}</p>}
-      {task.humanApprovalBy && task.status !== "queued" && <p className="mt-0.5 text-[11px] text-text-muted">{task.humanApprovalBy}{task.humanApprovalAt ? ` · ${formatRelativeTime(task.humanApprovalAt)}` : ""}</p>}
+      {reason && <p className="mt-1 text-small leading-relaxed text-text-muted">{reason}</p>}
+      {task.humanApprovalBy && task.status !== "queued" && <p className="mt-0.5 text-caption text-text-muted">{task.humanApprovalBy}{task.humanApprovalAt ? ` · ${formatRelativeTime(task.humanApprovalAt)}` : ""}</p>}
     </div>
   );
 }

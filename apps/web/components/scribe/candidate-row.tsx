@@ -52,20 +52,20 @@ export function CandidateRow({
   return (
     <div className="flex items-start justify-between gap-3 rounded-lg border border-border bg-surface px-3 py-2">
       <div className="min-w-0">
-        <p className="text-[14px] leading-snug text-text-primary">
+        <p className="text-body leading-snug text-text-primary">
           {candidate.title || "untitled"}
         </p>
-        <p className="mt-0.5 text-[12px] text-text-muted">
+        <p className="mt-0.5 text-small text-text-muted">
           {candidate.year ?? "year unknown"}
           {candidate.citedByCount != null &&
             ` · cited ${candidate.citedByCount.toLocaleString()}`}
         </p>
         {provenance && (
-          <p className="mt-1 text-[12px] text-text-secondary">{provenance}</p>
+          <p className="mt-1 text-small text-text-secondary">{provenance}</p>
         )}
       </div>
 
-      <div className="shrink-0 text-right text-[12px]">
+      <div className="shrink-0 text-right text-small">
         {state === "done" ? (
           <span className="text-accent">{note}</span>
         ) : state === "working" ? (
@@ -97,7 +97,7 @@ export function CandidateRow({
           <span className="text-text-muted">no source</span>
         )}
         {state === "error" && note && (
-          <p className="mt-1 max-w-[180px] text-[#b4493b]">{note}</p>
+          <p className="mt-1 max-w-[180px] text-missing">{note}</p>
         )}
       </div>
     </div>

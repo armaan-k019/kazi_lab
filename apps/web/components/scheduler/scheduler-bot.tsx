@@ -3,6 +3,7 @@
 import { useEffect, useRef } from "react";
 import * as THREE from "three";
 import type { SchedulerBotState } from "@/lib/types";
+import { BOT } from "@/lib/design-tokens";
 
 // ---------------------------------------------------------------------------
 // SchedulerBot: a plush penguin-blob robot, green and white, rounded
@@ -38,7 +39,7 @@ export type BotTuning = {
 };
 
 export const BOT_DEFAULTS: BotTuning = {
-  bodyGreen: "#4fb585", // soft leafy green, inside the #4CAF7D..#5BBD8B band
+  bodyGreen: BOT.bodyGreen, // THE living green from the design tokens
   bellyCoverage: 0.62,
   eyeSize: 1.0,
   eyeHeight: 0.0,
@@ -141,14 +142,14 @@ const BODY_SIT = 0.86; // where the bottom flattens (fraction of RY); lower = fl
 const LATHE_SEGMENTS = 48; // radial smoothness; raise if any facet shows
 
 // Palette.
-const BELLY_WHITE = "#f4f6f3"; // warm white for the face-and-belly panel
-const EYE_COLOR = 0x1f2529; // near-black; pure black reads harsh
+const BELLY_WHITE = BOT.belly; // paper white from the design tokens
+const EYE_COLOR = BOT.eye; // the palette ink
 const EYE_HIGHLIGHT = 0xffffff;
-const BEAK_COLOR = 0xe8a24b; // warm orange beak nub
+const BEAK_COLOR = BOT.beak; // the palette warm neutral
 const MOUTH_COLOR = 0x2a3034; // curved-line mouth (FACE_STYLE "mouth")
-const CHEEK_COLOR = 0xf0988c; // warm pink blush
+const CHEEK_COLOR = BOT.cheek; // faint blush, warmed to sit in the palette
 const CHEEK_OPACITY = 0.28; // sprite peak alpha; the soft texture makes it read ~0.05
-const FEET_TINT = 0.72; // feet darken the body green by this factor
+const FEET_TINT = BOT.feetTint; // feet darken the body green by this factor
 const ANTENNA_TINT = 0.8; // antenna darkens the body green by this factor
 const SHADOW_OPACITY = 0.15; // ground contact shadow; raise = heavier grounding
 
@@ -591,7 +592,9 @@ export function SchedulerBot({
     const fill = new THREE.DirectionalLight(0xd6e6ff, 0.55);
     fill.position.set(2.5, 0.8, 1.5);
     scene.add(fill);
-    const rim = new THREE.DirectionalLight(0xffffff, 0.9);
+    // Rim light from the tokens: keeps the silhouette against busy field
+    // regions on the dark environment.
+    const rim = new THREE.DirectionalLight(BOT.rimColor, BOT.rimIntensity);
     rim.position.set(0.4, 2.6, -3);
     scene.add(rim);
 
@@ -1071,6 +1074,12 @@ export function SchedulerBot({
         footR = Math.max(0, -sPh) * WADDLE_FOOT_LIFT * walkAmp;
       }
       yaw += (targetYaw - yaw) * Math.min(1, dt * WADDLE_TURN_RATE);
+      // Hard bound: the bot is always fully visible in its home region.
+      {
+        const maxR = Math.max(0.1, t.wanderRadius * prof.wanderMult);
+        posX = Math.max(-maxR, Math.min(maxR, posX));
+        posZ = Math.max(-maxR * WANDER_Z_FACTOR, Math.min(maxR * WANDER_Z_FACTOR, posZ));
+      }
 
       // ---------------------------------------------------------------------
       // ANTICS (idle only unless fired from /bot-test). Real states always
