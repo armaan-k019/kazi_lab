@@ -4,6 +4,7 @@ import { useDeferredValue, useEffect, useMemo, useState } from "react";
 import { BOTANY_DEFAULTS, type BotanyConfig } from "@/lib/botany-config";
 import { libraryToTreeParams, type LibraryBotanyInput, type StageLite } from "@/lib/botany";
 import { BotanyScene, type SceneBridge, type SceneTree } from "@/components/botany/botany-scene";
+import { BotanyLegend } from "@/components/botany/botany-legend";
 import type { PipelineLibrary, ResearchPipeline } from "@/lib/types";
 
 // ---------------------------------------------------------------------------
@@ -52,7 +53,7 @@ export default function BotanyTestPage() {
   const [botany, setBotany] = useState<BotanyApi | null>(null);
   const [config, setConfig] = useState<BotanyConfig>({ ...BOTANY_DEFAULTS });
   const [selected, setSelected] = useState<string>("spatial");
-  const [mode, setMode] = useState<"single" | "pair">("single");
+  const [mode, setMode] = useState<"single" | "pair" | "forest">("forest");
   const [pairA, setPairA] = useState<string>("spatial");
   const [pairB, setPairB] = useState<string>("cosmic-structure");
   const [stats, setStats] = useState<{ drawCallsPerTree: number; branchInstances: number; leafInstances: number; effectiveVertices: number } | null>(null);
@@ -77,6 +78,18 @@ export default function BotanyTestPage() {
     if (mode === "single") {
       const input = byName.get(selected) ?? inputs[0];
       return { trees: [{ params: libraryToTreeParams(input, deferredConfig), x: 0, z: 0 }], bridges: [], active: [input] };
+    }
+    if (mode === "forest") {
+      // FOREST PREVIEW: all real trees with the lighting rig and every real
+      // bridge, so the human tunes the composed scene, not one lone tree.
+      const spacing = 2.8;
+      const x0 = -((inputs.length - 1) * spacing) / 2;
+      const sceneTrees: SceneTree[] = inputs.map((input, i) => ({ params: libraryToTreeParams(input, deferredConfig), x: x0 + i * spacing, z: 0 }));
+      const indexById = new Map(inputs.map((x, i) => [x.id, i]));
+      const sceneBridges: SceneBridge[] = (botany?.bridges ?? [])
+        .filter((br) => indexById.has(br.a) && indexById.has(br.b))
+        .map((br) => ({ fromIndex: indexById.get(br.a)!, toIndex: indexById.get(br.b)!, linkCount: br.linkCount }));
+      return { trees: sceneTrees, bridges: sceneBridges, active: inputs };
     }
     const a = byName.get(pairA) ?? inputs[0];
     const b = byName.get(pairB) ?? inputs[1] ?? inputs[0];
@@ -135,6 +148,7 @@ export default function BotanyTestPage() {
       </p>
 
       <div className="mt-4 flex flex-wrap items-center gap-3">
+        <ModeChip label="forest preview" active={mode === "forest"} onClick={() => setMode("forest")} />
         <ModeChip label="one tree" active={mode === "single"} onClick={() => setMode("single")} />
         <ModeChip label="two trees + bridge" active={mode === "pair"} onClick={() => setMode("pair")} />
         {mode === "single" ? (
@@ -165,6 +179,10 @@ export default function BotanyTestPage() {
                 : "no cross-domain link recorded between these two libraries; no bridge is drawn (the tree never invents one)"}
             </p>
           )}
+
+          <div className="mt-4 max-w-xs">
+            <BotanyLegend />
+          </div>
 
           {/* THE HONESTY READOUT: the mapping, stated next to the tree. */}
           <div className="mt-4 flex flex-wrap gap-8">

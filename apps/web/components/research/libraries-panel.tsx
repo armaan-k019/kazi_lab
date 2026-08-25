@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { formatRelativeTime } from "@/lib/format";
+import Link from "next/link";
 import { useLab } from "@/components/shell/lab-context";
 
 // ---------------------------------------------------------------------------
@@ -144,6 +145,14 @@ export function LibrariesPanel() {
                     {l.stages.papers.count} papers · synthesis{" "}
                     {l.stages.synthesis.at ? formatRelativeTime(l.stages.synthesis.at) : l.stages.synthesis.state} ·{" "}
                     {l.stages.metrics.rows} metric rows · critic {l.stages.critic.state === "done" ? "current" : l.stages.critic.state}
+                    {" · "}
+                    <Link
+                      href={`/?tree=${l.id}`}
+                      onClick={(e) => e.stopPropagation()}
+                      className="text-green-deep underline-offset-2 hover:underline"
+                    >
+                      see this as a tree
+                    </Link>
                   </p>
                 </button>
               )}

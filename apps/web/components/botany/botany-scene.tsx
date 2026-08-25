@@ -3,15 +3,21 @@
 import { useEffect, useRef } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
+import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
+import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
+import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
+import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
 import { COLOR } from "@/lib/design-tokens";
 import type { BotanyConfig } from "@/lib/botany-config";
-import { generateTree, type TreeParams } from "@/lib/botany";
+import type { TreeParams } from "@/lib/botany";
+import { buildTreeVisual, captionFromParams, makeLightRig, makeMist, makeSharedGeos } from "./tree-builder";
 
 // ---------------------------------------------------------------------------
-// BOTANY SCENE: renders trees (and their bridges) from generated instance
-// arrays. Instanced everything: one tree is 6 draw calls (branches, leaves,
-// fruit, blossoms, glow, and a shared ground/motes pair per scene), so a
-// 10-tree forest stays cheap. Gentle wind sway; reduced motion disables it.
+// BOTANY SCENE (/botany-test): renders trees and bridges through the SHARED
+// tree-visual builder (same materials and lighting as the narrative forest),
+// with orbit controls, optional low bloom, fog, mist, contact shadows, and
+// DOM name+state labels anchored to each tree. Everything tunable lives in
+// BotanyConfig; the data mapping is untouched here.
 // ---------------------------------------------------------------------------
 
 const PIXEL_RATIO_CAP = 2;
@@ -25,12 +31,14 @@ export function BotanyScene({
   bridges,
   config,
   heightPx = 560,
+  showLabels = true,
   onStats,
 }: {
   trees: SceneTree[];
   bridges: SceneBridge[];
   config: BotanyConfig;
   heightPx?: number;
+  showLabels?: boolean;
   onStats?: (s: { drawCallsPerTree: number; branchInstances: number; leafInstances: number; effectiveVertices: number }) => void;
 }) {
   const mountRef = useRef<HTMLDivElement | null>(null);
@@ -46,7 +54,7 @@ export function BotanyScene({
 
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(COLOR.paper);
-    scene.fog = new THREE.FogExp2(new THREE.Color(COLOR.paper).getHex(), 0.045);
+    scene.fog = new THREE.FogExp2(new THREE.Color(COLOR.paper).getHex(), config.fogDensity);
 
     const camera = new THREE.PerspectiveCamera(CAMERA_FOV, width / height, 0.1, 100);
     const spread = Math.max(3.2, trees.length * 1.6);
@@ -63,126 +71,78 @@ export function BotanyScene({
     controls.dampingFactor = 0.07;
     controls.target.set(0, 1.1, 0);
 
-    // Soft key / fill / rim, consistent with the app's dark environment.
-    scene.add(new THREE.AmbientLight(0xffffff, config.lightAmbient));
-    const key = new THREE.DirectionalLight(0xfff4e0, config.lightKey);
-    key.position.set(3, 5, 4);
-    scene.add(key);
-    const fill = new THREE.DirectionalLight(0xd8e8ff, config.lightFill);
-    fill.position.set(-3, 2, 2);
-    scene.add(fill);
-    const rim = new THREE.DirectionalLight(0xeafff2, config.lightRim);
-    rim.position.set(0, 4, -5);
-    scene.add(rim);
-
     const disposables: { dispose(): void }[] = [];
     const track = <T extends { dispose(): void }>(x: T): T => {
       disposables.push(x);
       return x;
     };
 
-    // Ground: a soft dark disc so trees sit somewhere.
+    // Optional subtle bloom, threshold-gated so only bright glow elements lift.
+    let composer: EffectComposer | null = null;
+    if (config.bloomStrength > 0) {
+      composer = new EffectComposer(renderer);
+      composer.setPixelRatio(Math.min(window.devicePixelRatio, PIXEL_RATIO_CAP));
+      composer.setSize(width, height);
+      composer.addPass(new RenderPass(scene, camera));
+      const bloom = new UnrealBloomPass(new THREE.Vector2(width, height), config.bloomStrength, config.bloomRadius, config.bloomThreshold);
+      track(bloom);
+      composer.addPass(bloom);
+      composer.addPass(new OutputPass());
+      track({ dispose: () => composer?.dispose() });
+    }
+
+    for (const light of makeLightRig(config)) scene.add(light);
+
     const groundGeo = track(new THREE.CircleGeometry(spread * 2.2, 48));
     const groundMat = track(new THREE.MeshStandardMaterial({ color: new THREE.Color(config.groundColor), roughness: 1, metalness: 0 }));
     const ground = new THREE.Mesh(groundGeo, groundMat);
     ground.rotation.x = -Math.PI / 2;
     scene.add(ground);
 
-    // Shared unit geometries: instanced per tree.
-    const branchGeo = track(new THREE.CylinderGeometry(0.85, 1, 1, 7));
-    const leafGeo = track(new THREE.PlaneGeometry(1, 1));
-    const fruitGeo = track(new THREE.SphereGeometry(1, 8, 6));
-    const blossomGeo = track(new THREE.OctahedronGeometry(1, 0));
-    const softTex = track(makeSoftTexture());
+    const shared = makeSharedGeos(config, track);
+    const mist = makeMist(config, spread * 1.6, track, shared.softTex);
+    if (mist) scene.add(mist);
+
+    // DOM labels: name + honest state caption, projected to each tree's
+    // canopy anchor per frame. Real text, selectable, screen-reader legible.
+    const labelEls: { el: HTMLDivElement; world: THREE.Vector3 }[] = [];
+    const labelLayer = document.createElement("div");
+    labelLayer.className = "pointer-events-none absolute inset-0 overflow-hidden";
+    if (showLabels) mount.appendChild(labelLayer);
 
     const treeGroups: THREE.Group[] = [];
     const treePhases: number[] = [];
     let statBranches = 0;
     let statLeaves = 0;
+    let statVerts = 0;
+    let statDraws = 0;
 
-    trees.forEach((t, ti) => {
-      const g = generateTree(t.params, config);
-      statBranches += g.branches.length;
-      statLeaves += g.leaves.length;
-      const group = new THREE.Group();
-      group.position.set(t.x, 0, t.z);
-      scene.add(group);
-      treeGroups.push(group);
+    trees.forEach((t) => {
+      const built = buildTreeVisual(t.params, config, shared, track);
+      built.group.position.set(t.x, 0, t.z);
+      scene.add(built.group);
+      treeGroups.push(built.group);
       treePhases.push((t.params.seed % 1000) / 1000);
+      statBranches += built.stats.branchInstances;
+      statLeaves += built.stats.leafInstances;
+      statVerts += built.stats.effectiveVertices;
+      statDraws += built.stats.drawCalls;
 
-      const dummy = new THREE.Object3D();
-      const setInstances = (mesh: THREE.InstancedMesh, list: typeof g.branches) => {
-        list.forEach((inst, i) => {
-          dummy.position.set(...inst.pos);
-          dummy.quaternion.set(...inst.quat);
-          dummy.scale.set(...inst.scale);
-          dummy.updateMatrix();
-          mesh.setMatrixAt(i, dummy.matrix);
-        });
-        mesh.instanceMatrix.needsUpdate = true;
-      };
-
-      const barkMat = track(new THREE.MeshStandardMaterial({ color: new THREE.Color(config.branchColor), roughness: 0.9, metalness: 0 }));
-      const branchesMesh = new THREE.InstancedMesh(branchGeo, barkMat, Math.max(1, g.branches.length));
-      setInstances(branchesMesh, g.branches);
-      branchesMesh.count = g.branches.length;
-      group.add(branchesMesh);
-
-      // Foliage color: healthy = the derived community-harmonized hue;
-      // critic-missing trees desaturate toward the bark register. Buds on
-      // bare trees carry the bud color (life, not error).
-      const foliage = new THREE.Color(t.params.foliageColor);
-      if (t.params.leafDesat > 0) {
-        const grey = new THREE.Color(config.branchColor);
-        foliage.lerp(grey, t.params.leafDesat);
-      }
-      const leafMat = track(
-        new THREE.MeshStandardMaterial({
-          color: t.params.inLeaf ? foliage : new THREE.Color(config.budColor),
-          roughness: 0.7,
-          metalness: 0,
-          side: THREE.DoubleSide,
-          transparent: true,
-          opacity: 0.92,
-          emissive: t.params.inLeaf ? foliage.clone().multiplyScalar(0.25) : new THREE.Color(config.budColor).multiplyScalar(0.2),
-        }),
-      );
-      const leavesMesh = new THREE.InstancedMesh(leafGeo, leafMat, Math.max(1, g.leaves.length));
-      setInstances(leavesMesh, g.leaves);
-      leavesMesh.count = g.leaves.length;
-      group.add(leavesMesh);
-
-      if (g.fruit.length > 0) {
-        const fruitMat = track(new THREE.MeshStandardMaterial({ color: new THREE.Color(config.fruitColor), roughness: 0.4, emissive: new THREE.Color(config.fruitColor).multiplyScalar(0.2) }));
-        const fruitMesh = new THREE.InstancedMesh(fruitGeo, fruitMat, g.fruit.length);
-        setInstances(fruitMesh, g.fruit);
-        group.add(fruitMesh);
-      }
-      if (g.blossoms.length > 0) {
-        const blossomMat = track(new THREE.MeshStandardMaterial({ color: new THREE.Color(config.blossomColor), roughness: 0.5, emissive: new THREE.Color(config.blossomColor).multiplyScalar(0.35) }));
-        const blossomMesh = new THREE.InstancedMesh(blossomGeo, blossomMat, g.blossoms.length);
-        setInstances(blossomMesh, g.blossoms);
-        group.add(blossomMesh);
-      }
-      for (const tip of g.glowTips) {
-        const m = track(new THREE.SpriteMaterial({ map: softTex, color: new THREE.Color(config.glowColor), transparent: true, opacity: config.glowOpacity, blending: THREE.AdditiveBlending, depthWrite: false }));
-        const sprite = new THREE.Sprite(m);
-        sprite.position.set(...tip);
-        sprite.scale.setScalar(0.5);
-        group.add(sprite);
+      if (showLabels) {
+        const el = document.createElement("div");
+        el.className = "absolute -translate-x-1/2 text-center";
+        el.innerHTML = `<p class="font-display text-ui leading-tight text-ink">${t.params.libraryName}</p><p class="text-caption text-ink-500">${captionFromParams(t.params)}</p>`;
+        labelLayer.appendChild(el);
+        labelEls.push({ el, world: built.labelAnchor.clone().add(new THREE.Vector3(t.x, 0, t.z)) });
       }
     });
 
-    // BRIDGES: cross-domain links as connecting growth. A vine arc between
-    // canopies; thickness and brightness scale with the link count.
     for (const b of bridges) {
-      const from = treeGroups[b.fromIndex];
-      const to = treeGroups[b.toIndex];
-      if (!from || !to) continue;
-      const hFrom = trees[b.fromIndex].params.heightScale;
-      const hTo = trees[b.toIndex].params.heightScale;
-      const p0 = new THREE.Vector3(from.position.x, hFrom * 0.75, from.position.z);
-      const p2 = new THREE.Vector3(to.position.x, hTo * 0.75, to.position.z);
+      const a = trees[b.fromIndex];
+      const c = trees[b.toIndex];
+      if (!a || !c) continue;
+      const p0 = new THREE.Vector3(a.x, a.params.heightScale * 0.75, a.z);
+      const p2 = new THREE.Vector3(c.x, c.params.heightScale * 0.75, c.z);
       const mid = p0.clone().add(p2).multiplyScalar(0.5);
       mid.y += p0.distanceTo(p2) * config.bridgeArcHeight;
       const curve = new THREE.QuadraticBezierCurve3(p0, mid, p2);
@@ -200,31 +160,28 @@ export function BotanyScene({
       scene.add(new THREE.Mesh(tubeGeo, tubeMat));
     }
 
-    // Motes: a few soft drifting particles for life.
-    const moteRng = () => Math.random(); // decorative only, explicitly NOT data
-    const motePositions = new Float32Array(config.motesCount * 3);
-    for (let i = 0; i < config.motesCount; i++) {
-      motePositions[i * 3] = (moteRng() * 2 - 1) * spread;
-      motePositions[i * 3 + 1] = 0.3 + moteRng() * 2.4;
-      motePositions[i * 3 + 2] = (moteRng() * 2 - 1) * spread;
-    }
-    const moteGeo = track(new THREE.BufferGeometry());
-    moteGeo.setAttribute("position", new THREE.BufferAttribute(motePositions, 3));
-    const moteMat = track(new THREE.PointsMaterial({ color: new THREE.Color(COLOR.green), size: 0.03, transparent: true, opacity: config.motesOpacity, depthWrite: false, blending: THREE.AdditiveBlending }));
-    const motes = new THREE.Points(moteGeo, moteMat);
-    scene.add(motes);
-
-    // Report the real budget upward.
-    const drawCallsPerTree = 4 + 1; // branches, leaves, fruit, blossoms (+ glow sprites vary); ground/motes shared
     onStatsRef.current?.({
-      drawCallsPerTree,
+      drawCallsPerTree: Math.round(statDraws / trees.length),
       branchInstances: Math.round(statBranches / trees.length),
       leafInstances: Math.round(statLeaves / trees.length),
-      effectiveVertices: Math.round((statBranches * 42 + statLeaves * 4) / trees.length),
+      effectiveVertices: Math.round(statVerts / trees.length),
     });
+
+    const proj = new THREE.Vector3();
+    const updateLabels = () => {
+      for (const l of labelEls) {
+        proj.copy(l.world).project(camera);
+        const sx = ((proj.x + 1) / 2) * (mount.clientWidth || width);
+        const sy = ((1 - proj.y) / 2) * height;
+        const visible = proj.z < 1 && sy > -40 && sy < height + 40;
+        l.el.style.display = visible ? "" : "none";
+        if (visible) l.el.style.transform = `translate(${sx}px, ${sy}px) translateX(-50%)`;
+      }
+    };
 
     let raf = 0;
     let disposed = false;
+    const renderOnce = () => (composer ? composer.render() : renderer.render(scene, camera));
     const animate = () => {
       if (disposed) return;
       raf = requestAnimationFrame(animate);
@@ -235,10 +192,10 @@ export function BotanyScene({
           g.rotation.z = Math.sin(t * config.swaySpeed * Math.PI * 2 * 0.5 + phase) * config.swayAmount;
           g.rotation.x = Math.cos(t * config.swaySpeed * Math.PI * 2 * 0.35 + phase) * config.swayAmount * 0.6;
         });
-        motes.rotation.y = t * 0.02;
       }
       controls.update();
-      renderer.render(scene, camera);
+      updateLabels();
+      renderOnce();
     };
     animate();
 
@@ -247,6 +204,7 @@ export function BotanyScene({
       camera.aspect = w / height;
       camera.updateProjectionMatrix();
       renderer.setSize(w, height);
+      composer?.setSize(w, height);
     };
     const resizeObserver = new ResizeObserver(onResize);
     resizeObserver.observe(mount);
@@ -262,23 +220,9 @@ export function BotanyScene({
       for (const d of disposables) d.dispose();
       renderer.dispose();
       if (renderer.domElement.parentNode === mount) mount.removeChild(renderer.domElement);
+      if (labelLayer.parentNode === mount) mount.removeChild(labelLayer);
     };
-  }, [trees, bridges, config, heightPx]);
+  }, [trees, bridges, config, heightPx, showLabels]);
 
-  return <div ref={mountRef} className="w-full overflow-hidden rounded-(--radius-glass)" style={{ height: heightPx }} />;
-}
-
-function makeSoftTexture(): THREE.CanvasTexture {
-  const size = 64;
-  const canvas = document.createElement("canvas");
-  canvas.width = size;
-  canvas.height = size;
-  const ctx = canvas.getContext("2d")!;
-  const g = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
-  g.addColorStop(0, "rgba(255,255,255,1)");
-  g.addColorStop(0.5, "rgba(255,255,255,0.35)");
-  g.addColorStop(1, "rgba(255,255,255,0)");
-  ctx.fillStyle = g;
-  ctx.fillRect(0, 0, size, size);
-  return new THREE.CanvasTexture(canvas);
+  return <div ref={mountRef} className="relative w-full overflow-hidden rounded-(--radius-glass)" style={{ height: heightPx }} />;
 }

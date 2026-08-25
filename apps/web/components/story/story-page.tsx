@@ -11,6 +11,7 @@ import type { PipelineLibrary } from "@/lib/types";
 import { MOTION } from "@/lib/design-tokens";
 import { SCENES, type SceneId } from "./story-config";
 import { StoryScene, type StoryBridge } from "./story-scene";
+import { BotanyLegend } from "@/components/botany/botany-legend";
 
 // ---------------------------------------------------------------------------
 // THE STORY: the lab's front door. One persistent canvas (StoryScene) behind
@@ -85,8 +86,27 @@ function StoryInner() {
     const indexById = new Map(inputs.map((x, i) => [x.id, i]));
     return botany.bridges
       .filter((b) => indexById.has(b.a) && indexById.has(b.b))
-      .map((b) => ({ aIndex: indexById.get(b.a)!, bIndex: indexById.get(b.b)!, linkCount: b.linkCount }));
+      .map((b) => ({ aIndex: indexById.get(b.a)!, bIndex: indexById.get(b.b)!, linkCount: b.linkCount, summary: b.summary }));
   }, [botany, inputs]);
+
+  // Reverse cross-link: /?tree=<libraryId> (from Research's "see this as a
+  // tree") scrolls the story to the Worlds chapter once the forest exists.
+  const treeFocusDoneRef = useRef(false);
+  useEffect(() => {
+    if (treeFocusDoneRef.current || inputs.length === 0) return;
+    const treeId = new URLSearchParams(window.location.search).get("tree");
+    if (!treeId) return;
+    treeFocusDoneRef.current = true;
+    const totalVhLocal = SCENES.reduce((s, x) => s + x.lengthVh, 0);
+    let acc = 0;
+    for (const sc of SCENES) {
+      if (sc.id === "worlds") break;
+      acc += sc.lengthVh;
+    }
+    const max = document.documentElement.scrollHeight - window.innerHeight;
+    const target = ((acc + 20) / totalVhLocal) * max;
+    window.scrollTo({ top: target, behavior: reducedMotion ? "auto" : "smooth" });
+  }, [inputs, reducedMotion]);
 
   // Scroll engine: rAF-throttled progress into a ref (the canvas consumes it
   // without re-rendering React) plus a scene index state that changes rarely.
@@ -276,6 +296,9 @@ function StoryInner() {
               })}
               {pipe.length === 0 && <li className="text-small text-ink-500">no libraries yet</li>}
             </ul>
+            <div className="mt-4 border-t border-hairline pt-3">
+              <BotanyLegend compact />
+            </div>
           </motion.div>
         </Chapter>
 

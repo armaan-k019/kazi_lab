@@ -61,6 +61,31 @@ export type BotanyConfig = {
   leafJitter: number; // positional scatter of leaves around a tip
   fruitSize: number;
   blossomSize: number;
+  // MATERIALS (render quality; the data mapping is untouched by these).
+  barkRoughness: number; // lower = waxier bark
+  barkVariation: number; // seeded per-segment tone variation (0..1)
+  branchRadialSegments: number; // radial smoothness of trunk/branch cylinders
+  leafTranslucency: number; // emissive rim strength; the subsurface feel
+  leafColorSpread: number; // per-leaf variation around the community hue
+  leafOpacity: number;
+  leafGlowOpacity: number; // soft additive canopy layer; 0 disables it
+  fruitRoughness: number;
+  fruitEmissive: number;
+  blossomRoughness: number;
+  blossomEmissive: number;
+  // LIGHTING RIG AND ATMOSPHERE.
+  lightKeyColor: string; // warm key
+  lightFillColor: string; // cool fill
+  lightRimColor: string; // soft rim/back so silhouettes separate
+  lightKeyAzimuthDeg: number; // rotates the key around the forest
+  contactShadowOpacity: number; // soft radial decal at each base (planted feel)
+  contactShadowScale: number; // shadow radius vs tree height
+  fogDensity: number; // distant trees recede
+  mistOpacity: number; // faint ground mist; 0 disables
+  mistHeight: number; // mist plane height above the floor
+  bloomStrength: number; // subtle bloom on bright glow/fruit; 0 disables
+  bloomRadius: number;
+  bloomThreshold: number; // high threshold keeps bloom off foliage
   // MOTION AND SCENE.
   swayAmount: number; // radians of idle wind sway (reduced-motion disables)
   swaySpeed: number; // sway cycles per second-ish
@@ -130,6 +155,29 @@ export const BOTANY_DEFAULTS: BotanyConfig = {
   leafJitter: 0.1,
   fruitSize: 0.04,
   blossomSize: 0.05,
+  barkRoughness: 0.85,
+  barkVariation: 0.18,
+  branchRadialSegments: 10,
+  leafTranslucency: 0.35,
+  leafColorSpread: 0.16,
+  leafOpacity: 0.92,
+  leafGlowOpacity: 0.18,
+  fruitRoughness: 0.3,
+  fruitEmissive: 0.25,
+  blossomRoughness: 0.45,
+  blossomEmissive: 0.4,
+  lightKeyColor: "#ffe9cf",
+  lightFillColor: "#cfe2ff",
+  lightRimColor: "#eafff2",
+  lightKeyAzimuthDeg: 38,
+  contactShadowOpacity: 0.42,
+  contactShadowScale: 1.1,
+  fogDensity: 0.035,
+  mistOpacity: 0.12,
+  mistHeight: 0.5,
+  bloomStrength: 0.35,
+  bloomRadius: 0.6,
+  bloomThreshold: 0.75,
   swayAmount: 0.02,
   swaySpeed: 0.45,
   motesCount: 42,

@@ -45,7 +45,6 @@ export const STORY = {
   lodNearDistance: 7, // trees closer than this render full detail
   swayNearOnly: true, // distant trees skip per-frame sway work
   heroTreePulse: 0.5, // gentle emissive breathing on the hero framing
-  fogDensity: 0.028,
   scrollEase: 0.12, // per-frame easing of camera toward the scroll target
 } as const;
 

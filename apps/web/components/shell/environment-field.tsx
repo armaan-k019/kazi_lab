@@ -13,7 +13,7 @@ import { useLab } from "./lab-context";
 // The transition is the ambient veil easing over 500ms, never a remount.
 // ---------------------------------------------------------------------------
 
-export function EnvironmentField({ focused }: { focused: boolean }) {
+export function EnvironmentField({ focused, calmed = false }: { focused: boolean; calmed?: boolean }) {
   const lab = useLab();
   const { data, groups, activity, selectedLibraryId, portalRect } = lab;
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -44,7 +44,15 @@ export function EnvironmentField({ focused }: { focused: boolean }) {
     <>
       <div
         className="fixed inset-0 z-0"
-        style={{ pointerEvents: focused ? "auto" : "none", clipPath, transition: "clip-path var(--focus-ms) var(--motion-ease)" }}
+        style={{
+          pointerEvents: focused ? "auto" : "none",
+          clipPath,
+          // Research calm: the field fades to a whisper (or off) behind the
+          // pipeline content; the dark ground remains via the page body.
+          opacity: calmed ? (AMBIENT.researchFieldOff ? 0 : AMBIENT.researchOpacity) : 1,
+          display: calmed && AMBIENT.researchFieldOff ? "none" : undefined,
+          transition: "clip-path var(--focus-ms) var(--motion-ease), opacity var(--focus-ms) var(--motion-ease)",
+        }}
       >
         <WebGraph3D
           nodes={data.nodes}

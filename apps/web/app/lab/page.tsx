@@ -45,7 +45,7 @@ function LabHome() {
   return (
     <LabProvider>
       <DeepLink />
-      <EnvironmentField focused={section === "discovery"} />
+      <EnvironmentField focused={section === "discovery"} calmed={section === "research"} />
       <DevTuningPanel />
       <main className="pointer-events-none relative z-10 mx-auto w-full max-w-[1720px] px-5 pb-6 lg:px-8">
         {/* The lab name sits directly on the environment: pure editorial type. */}

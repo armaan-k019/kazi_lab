@@ -282,7 +282,7 @@ export const openQuestions = pgTable("open_questions", {
 
 // A short, precomputed positioning paragraph per (paper, synthesis run): where
 // the paper sits in this library's web (what it extends, what contradicts it,
-// its distinct contribution). Supplementary — a run is usable without it.
+// its distinct contribution). Supplementary; a run is usable without it.
 export const paperNarrations = pgTable("paper_narrations", {
   id: uuid("id").primaryKey().defaultRandom(),
   synthesisRunId: uuid("synthesis_run_id")
@@ -1024,6 +1024,127 @@ export const schedulerDiagnostics = pgTable("scheduler_diagnostics", {
   details: jsonb("details"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
+
+// ---------------------------------------------------------------------------
+// Corpus expansion (checkpointed): a large controlled expansion reached only
+// through the citation graph from existing verified corpus papers, filtered by
+// a documented relevance bar. These tables ARE the checkpoint: every state
+// transition is a transactional row update, so a crash/timeout/credit-out at
+// any point leaves a consistent state and a restart resumes exactly where it
+// stopped with no duplicates. Nothing here is ever fabricated: every candidate
+// row records the real Semantic Scholar record it came from and the real
+// corpus papers that link to it.
+// ---------------------------------------------------------------------------
+
+export const expansionRuns = pgTable("expansion_runs", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  // Ceiling, not a quota: the run stops early with an honest shortfall when
+  // the eligible pool dries up.
+  targetNew: integer("target_new").notNull(),
+  waveSize: integer("wave_size").notNull(),
+  // running | stopped | completed | failed. stopped = clean resumable stop
+  // (credit/API failure or operator interrupt); running after a crash is also
+  // resumable (the tables are the checkpoint).
+  status: text("status").notNull().default("running"),
+  currentWave: integer("current_wave").notNull().default(0),
+  corpusSizeStart: integer("corpus_size_start"),
+  // Per-library paper counts at run start, for the growth report.
+  libraryCountsStart: jsonb("library_counts_start"),
+  // share-per-field over the resolved corpus, refreshed each wave (the
+  // relevance filter's field-fit input; persisted for auditability).
+  fieldDistribution: jsonb("field_distribution"),
+  // The exact filter/score constants this run used (auditability).
+  params: jsonb("params"),
+  notes: text("notes"),
+  error: text("error"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+// One row per corpus paper whose citation neighborhood feeds discovery. Seeded
+// with the whole corpus at run start; papers ingested by this run join the
+// frontier so later waves expand outward from them. status: pending | fetched |
+// unresolved (no Semantic Scholar record; final) | failed (retryable).
+export const expansionFrontier = pgTable(
+  "expansion_frontier",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    runId: uuid("run_id")
+      .notNull()
+      .references(() => expansionRuns.id, { onDelete: "cascade" }),
+    paperId: uuid("paper_id")
+      .notNull()
+      .references(() => papers.id, { onDelete: "cascade" }),
+    s2PaperId: text("s2_paper_id"),
+    status: text("status").notNull().default("pending"),
+    // Semantic Scholar fieldsOfStudy for THIS corpus paper (field-distribution input).
+    fields: jsonb("fields"),
+    refsFound: integer("refs_found"),
+    citesFound: integer("cites_found"),
+    // The wave in which this paper joined the frontier (0 = original corpus).
+    joinedWave: integer("joined_wave").notNull().default(0),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("expansion_frontier_run_paper_uq").on(table.runId, table.paperId),
+    index("expansion_frontier_run_status_idx").on(table.runId, table.status),
+  ],
+);
+
+// One row per DISTINCT paper discovered in the citation neighborhood of the
+// corpus (deduped by Semantic Scholar id) that is not already in the corpus.
+// Carries everything the deterministic relevance filter needs, its verdict,
+// and the full ingest lifecycle. status: pending | selected | ingested |
+// skipped | failed (failed = retryable next wave until attempts run out).
+export const expansionCandidates = pgTable(
+  "expansion_candidates",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    runId: uuid("run_id")
+      .notNull()
+      .references(() => expansionRuns.id, { onDelete: "cascade" }),
+    s2PaperId: text("s2_paper_id").notNull(),
+    title: text("title").notNull(),
+    arxivId: text("arxiv_id"),
+    doi: text("doi"),
+    fieldsOfStudy: jsonb("fields_of_study"),
+    citationCount: integer("citation_count"),
+    // Provenance of connectivity: WHICH corpus papers cite/are cited by this
+    // candidate, and which of those edges Semantic Scholar flags influential.
+    linkedPaperIds: uuid("linked_paper_ids").array().notNull().default(sql`'{}'::uuid[]`),
+    influentialFromIds: uuid("influential_from_ids").array().notNull().default(sql`'{}'::uuid[]`),
+    corpusLinks: integer("corpus_links").notNull().default(0),
+    influentialLinks: integer("influential_links").notNull().default(0),
+    fieldFit: real("field_fit"), // null = Semantic Scholar has no field data
+    score: real("score"),
+    eligible: boolean("eligible"),
+    ineligibleReason: text("ineligible_reason"),
+    status: text("status").notNull().default("pending"),
+    skipReason: text("skip_reason"),
+    sourceUrl: text("source_url"),
+    // Which existing library it was assigned to (null = corpus-only, no forced fit).
+    assignedLibraryId: uuid("assigned_library_id").references(() => libraries.id, {
+      onDelete: "set null",
+    }),
+    // Set only after the full per-paper pipeline succeeded.
+    paperId: uuid("paper_id").references(() => papers.id, { onDelete: "set null" }),
+    selectedWave: integer("selected_wave"),
+    attempts: integer("attempts").notNull().default(0),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("expansion_candidates_run_s2_uq").on(table.runId, table.s2PaperId),
+    index("expansion_candidates_run_status_idx").on(table.runId, table.status),
+  ],
+);
+
+export type ExpansionRun = typeof expansionRuns.$inferSelect;
+export type NewExpansionRun = typeof expansionRuns.$inferInsert;
+export type ExpansionFrontierRow = typeof expansionFrontier.$inferSelect;
+export type NewExpansionFrontierRow = typeof expansionFrontier.$inferInsert;
+export type ExpansionCandidate = typeof expansionCandidates.$inferSelect;
+export type NewExpansionCandidate = typeof expansionCandidates.$inferInsert;
 
 export type SchedulerRun = typeof schedulerRuns.$inferSelect;
 export type NewSchedulerRun = typeof schedulerRuns.$inferInsert;

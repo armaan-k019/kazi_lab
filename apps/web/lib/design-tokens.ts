@@ -116,6 +116,12 @@ export const AMBIENT = {
   // the ambient field (the pipeline strip); label suppression is the primary
   // legibility fix, this is the backstop.
   textScrim: 0.38,
+  // RESEARCH CALM: on the Research tab the field drops to a whisper so the
+  // pipeline strip and library rows read cleanly. researchFieldOff kills it
+  // entirely; researchOpacity is the "faint" setting. The dark ground stays
+  // either way; this only removes the busy line-web texture behind text.
+  researchOpacity: 0.06,
+  researchFieldOff: false,
 } as const;
 
 // Editorial grid (unchanged intent).

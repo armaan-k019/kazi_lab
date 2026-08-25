@@ -71,6 +71,103 @@ run, ~$1 per proposal run), stored per task and never asserted as precise.
 
 ## Decisions
 
+### 2026-08-25 Large controlled corpus expansion via the citation graph (stopped cleanly at 216 of 400)
+
+Decision: expand the corpus from 107 papers toward ~500 exclusively through the
+Semantic Scholar citation graph from existing verified papers, gated by a
+documented deterministic relevance bar, fully checkpointed in new expansion_*
+tables (expansion_runs, expansion_frontier, expansion_candidates). No keyword
+search exists anywhere in the pipeline. New code: expansion-config.ts,
+expand-corpus.ts, expand-corpus-cli.ts in the scribe package plus migration
+0019. Ingestion, Semantic Scholar, OpenAlex, web build, scheduler, and botany
+code reused read-only, unmodified.
+
+The relevance bar (constants in expansion-config.ts): eligible only with >= 2
+distinct corpus citation links AND field fit >= 0.15 (field fit = max corpus
+share among the candidate's fieldsOfStudy; unknown fields need >= 3 links), or
+exactly 1 link that is influential AND field fit >= 0.5. A single weak link is
+never eligible (that is how off-topic drift entered before). Ranking: capped
+connectivity + influence + field fit + capped prominence; ties on s2PaperId.
+Audited on real rejections: Scikit-learn, the Deep Learning textbook, Shannon
+1948, MS COCO all rejected as single-weak-link; a Medicine stub and an
+agriculture paper rejected on field fit.
+
+State at stop (operator-requested, in the between-wave safe window with no
+paper in flight): corpus 107 -> 323 (216 ingested, all with extraction +
+embeddings + verified; 0 orphans, 0 duplicates). 19,427 candidates discovered,
+5,105 still eligible and pending, 5 retryable failures, 37 skips (33 =
+no open-access source; honest skips, never force-fetched). Growth was heavily
+concentrated: generative-3d 19 -> 225, spatial 20 -> 28, 2 corpus-only;
+cosmic-structure and urban-heat unchanged (their neighborhoods are sparser in
+the citation graph and rank lower at the same bar). Target 400 treated as a
+ceiling, not a quota; shortfall 184 is honest and resumable, the bar was not
+lowered. Metric extraction deliberately deferred to a later scheduler pass.
+
+Resumability was proven three ways: two real network outages and one deliberate
+SIGKILL mid-wave, each resumed with zero duplication (per-paper transactions,
+per-frontier-paper transactional merges, embedding verification with
+compensating delete). Hardening added along the way: transient network errors
+back off 30s and retry the same wave without burning candidate attempts;
+outage-poisoned "unresolved" frontier verdicts are re-checked each pass.
+
+Consequences: the rendered web (last build 2026-08-18, 107 paper nodes) and
+communities/bridges/ABC are now stale versus the 323-paper corpus; new papers
+have no citations rows until a citations backfill runs. The cheapest honest
+refresh is citations backfill (free) + web rebuild (deterministic except one
+community-labeling LLM call, under a dollar) + scheduler detection (free);
+synthesis/metrics for the grown libraries are separate paid passes the
+scheduler will flag. Resume the expansion later with: pnpm --filter
+@kazi-lab/scribe expand.
+
+### 2026-08-23 Research calm, forest legibility, elevated botany render quality
+Decision, three parts, all visual (agents, scheduler, grouping, portal data
+logic, and the botany DATA MAPPING untouched; only materials, lighting,
+labels, and tokens changed).
+Research calm: two tokens, AMBIENT.researchOpacity (default 0.06, the
+whisper) and AMBIENT.researchFieldOff (the kill switch), fade the ambient
+field's canvas on the Research tab only; the dark ground stays; Discovery
+is unchanged. The pipeline strip, library rows, and panels now read with
+at most a hint of depth behind them.
+Forest legibility: trees carry DOM name+state labels anchored to their
+canopies (projected per frame; real selectable text) with honest captions
+from captionFromParams, which restates the generator's own foliage rules
+("bare: no synthesis yet" / "in full leaf, 12 fruit, glowing"). A botany
+KEY (BotanyLegend) states the mapping plainly and appears in the Worlds
+chapter and on /botany-test. Cross-links close the loop both ways: forest
+trees deep-link to /lab Research (existing) and each Research library row
+gained "see this as a tree", which opens /?tree=<id> and scrolls the story
+to the Worlds chapter. Vine arcs caption their real finding (link count
+plus the link summary) while the bridges chapter is active.
+Render quality: a SHARED tree-visual builder (components/botany/
+tree-builder.ts) now serves both /botany-test and the narrative forest,
+so the look cannot diverge. Bark: per-instance color ramp from base tone
+(thick segments) to tip tone (young growth) with seeded variation
+(barkVariation) and tunable roughness over real lighting, replacing the
+flat plastic fill; trunk cylinders smoothed to 10 radial segments
+(branchRadialSegments). Foliage: per-leaf seeded color spread around the
+community hue (leafColorSpread), a translucency feel via emissive
+(leafTranslucency), and an optional additive canopy glow layer sharing the
+same instance matrices (leafGlowOpacity, one extra draw call). Fruit and
+blossoms got dimensional geometry (12x8 sphere, detail-1 octahedron) with
+tunable roughness and emissive. Lighting: a tunable warm-key/cool-fill/
+soft-rim rig (colors, intensities, key azimuth). Planted feel: a soft
+radial contact-shadow decal per tree (chosen over real shadow maps for
+cost). Atmosphere: fogDensity and a faint additive ground mist
+(mistOpacity, mistHeight). Optional low bloom (bloomStrength 0 disables),
+threshold-gated so only bright glow/fruit elements lift. Every new value
+is a BotanyConfig tunable and appears automatically on /botany-test's
+generated control panel; a new FOREST PREVIEW mode renders all four real
+trees with the rig and every real bridge so the human tunes the composed
+scene and bakes it via copy-config. All visual variation is seeded from
+the tree's data seed: determinism holds.
+Budget (estimates; instanced throughout): a full tree is now 6 to 8 draw
+calls and roughly 45k to 70k effective vertices at the dense end (the
+10-radial cylinders and the glow layer added ~40 percent); the four-tree
+forest preview is ~170k effective vertices plus one bloom pass; a 10-tree
+forest with the existing LOD (full near, reduced far) projects to ~280k.
+The story's frame-budget fallback (render-on-scroll above 10ms) is
+unchanged and remains the weak-GPU path.
+
 ### 2026-08-23 Portal containment; the scroll-driven narrative front door
 Decision, part 1 (containment): in focus mode the community label sprites
 projected outside the portal region and drew over the header, tab bar, and
